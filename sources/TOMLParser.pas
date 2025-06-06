@@ -53,7 +53,7 @@ type
       function ParseTime(continueFromNumber: boolean = false): TTOMLDate.TTime;
       procedure ParsePair;
       function ParseValue: TTOMLData;
-      function ParseKey: TStringList;
+      function ParseKey: TArray<string>;
 
       function ReadDigits(digits: integer; decimals: boolean = false): string;
     protected
@@ -83,9 +83,12 @@ var
   parser: TTOMLScanner;
 begin
   parser := TTOMLScanner.Create(contents);
-  parser.Parse;
-  result := parser.document;
-  parser.Free;
+  try
+    parser.Parse;
+    result := parser.document;
+  finally
+    parser.Free;
+  end;
 end;
 
 { TTOMLScanner }
@@ -244,7 +247,7 @@ end;
 
 function TTOMLScanner.ParseArrayOfTables: TTOMLData;
 var
-  keys: TStringList;
+  keys: TArray<string>;
   table: TTOMLData;
   parent, child: TTOMLTable;
   arr: TTOMLArray;
@@ -258,7 +261,7 @@ begin
   PopLast;
   parent := LastTable;
 
-  for i := 0 to keys.Count - 1 do
+  for i := 0 to Length(keys) - 1 do
     begin
       table := parent.Find(keys[i]);
       if table = nil then
@@ -278,7 +281,7 @@ begin
       else if table is TTOMLArray then
         begin
           // the last key should add a new table to the array
-          if i = keys.Count - 1 then
+          if i = length(keys) - 1 then
             begin
               child := TTOMLTable.Create(keys[i]);
               TTOMLArray(table).Add(child);
@@ -299,7 +302,7 @@ end;
 
 function TTOMLScanner.ParseTable: TTOMLData;
 var
-  keys: TStringList;
+  keys: TArray<string>;
   table: TTOMLData;
   parent, child: TTOMLTable;
   i: integer;
@@ -315,7 +318,7 @@ begin
   PopLast;
   parent := LastTable;
 
-  for i := 0 to keys.Count - 1 do
+  for i := 0 to Length(keys) - 1 do
     begin
       table := parent.Find(keys[i]);
       if table = nil then
@@ -328,7 +331,7 @@ begin
         begin
           // the final key defines a new table
           // which is illegal if
-          if (i = keys.Count - 1) and TTOMLTable(table).defined then
+          if (i = Length(keys) - 1) and TTOMLTable(table).defined then
             ParserError('Table "'+keys[i]+'" is already defined')
           else
             parent := TTOMLTable(table);
@@ -367,21 +370,26 @@ begin
   result := TTOMLTable.Create;
   containers.Add(result);
 
-  repeat
-    ParsePair;
+  try
+    repeat
+      ParsePair;
 
-    if TryConsume(TToken.Comma) then
-      begin
-        // curly bracket found for pair
-        if TryConsume(TToken.CurlyBracketClosed) then
-          ParserError('Inline tables do not allow trailing commas.');
-        continue;
-      end;
-  until TryConsume(TToken.CurlyBracketClosed);
+      if TryConsume(TToken.Comma) then
+        begin
+          // curly bracket found for pair
+          if TryConsume(TToken.CurlyBracketClosed) then
+            ParserError('Inline tables do not allow trailing commas.');
+          continue;
+        end;
+    until TryConsume(TToken.CurlyBracketClosed);
 
-  // disable EOL tokens and clear the next one if it's found
-  readLineEndingsAsTokens := false;
-  TryConsume(TToken.EOL);
+    // disable EOL tokens and clear the next one if it's found
+    readLineEndingsAsTokens := false;
+    TryConsume(TToken.EOL);
+  except
+    result.Free;
+    raise;
+  end;
 
   result.terminated := true;
 
@@ -455,24 +463,24 @@ function TTOMLScanner.ParseValue: TTOMLData;
     end;
   end;
 
-function OctalToInt(const S: string): Integer;
-var
-  i: Integer;
-begin
-  Result := 0;
-  // Process each digit
-  for i := 1 to Length(S) do
+  function OctalToInt(const S: string): Integer;
+  var
+    i: Integer;
   begin
-    case S[i] of
-      '0'..'7':
-        begin
-          Result := Result * 8 + Ord(S[i]) - Ord('0');
-        end;
-      else
-        raise EConvertError.CreateFmt('Invalid octal digit "%s" in string "%s"', [S[i], S]);
+    Result := 0;
+    // Process each digit
+    for i := 1 to Length(S) do
+    begin
+      case S[i] of
+        '0'..'7':
+          begin
+            Result := Result * 8 + Ord(S[i]) - Ord('0');
+          end;
+        else
+          raise EConvertError.CreateFmt('Invalid octal digit "%s" in string "%s"', [S[i], S]);
+      end;
     end;
   end;
-end;
 
 var
   negative: boolean;
@@ -542,12 +550,12 @@ begin
           ParserError('Invalid value "' + TEncoding.UTF8.GetString(pattern) +'"');
       end;
     else
-      result := nil;
+      ParserError('Unexpected token "'+token.ToString+'"')
   end;
   Assert(result <> nil, 'Invalid TOML value from "'+token.ToString+'"');
 end;
 
-function TTOMLScanner.ParseKey: TStringList;
+function TTOMLScanner.ParseKey: TArray<string>;
 begin
   { *Bare* keys may only contain ASCII letters, ASCII digits, underscores, and dashes (A-Za-z0-9_-).
     Note that bare keys are allowed to be composed of only ASCII digits, e.g. 1234,
@@ -556,23 +564,23 @@ begin
     *Quoted* keys follow the exact same rules as either basic strings or literal strings and allow
     you to use a much broader set of key names. Best practice is to use bare keys except when absolutely necessary. }
 
-  result := TStringList.Create;
+  result := [];
 
   while true do
     begin
       if (token = TToken.DoubleQuote) or (token = TToken.SingleQuote) then
         begin
           Consume;
-          result.Add(ParseString);
+          result := result + [ParseString];
         end
       else if token = TToken.Integer then
         begin
           Consume;
-          result.Add(TEncoding.UTF8.GetString(pattern));
+          result := result + [TEncoding.UTF8.GetString(pattern)];
         end
       else
         begin
-          result.Add(TEncoding.UTF8.GetString(pattern));
+          result := result + [TEncoding.UTF8.GetString(pattern)];
           Consume(TToken.ID);
         end;
 
@@ -586,7 +594,7 @@ end;
 
 procedure TTOMLScanner.ParsePair;
 var
-  keys: TStringList;
+  keys: TArray<string>;
   lastKey: TTOMLData;
   table, value: TTOMLData;
   child, parent: TTOMLTable;
@@ -594,18 +602,17 @@ var
 begin
   keys := ParseKey;
   Consume(TToken.Equals);
-  value := ParseValue;
 
   //writeln('parse pair: ',keys.CommaText);
 
   parent := LastTable;
 
   // add dotted keys as tables
-  if keys.Count > 1 then
+  if Length(keys) > 1 then
     begin
       if parent.parentIsArray then
         parent := TTOMLTable(parent.parent);
-      for i := 0 to keys.Count - 2 do
+      for i := 0 to Length(keys) - 2 do
         begin
           table := parent.Find(keys[i]);
           if table = nil then
@@ -629,27 +636,34 @@ begin
               parent := child;
             end;
         end;
-    end
-  else if parent.Find(keys[0]) <> nil then
-    begin
-      if (value is TTOMLTable) and (TTOMLTable(value).terminated) then
-        ParserError('Inline tables can not replace partially defined tables');
     end;
 
-  if parent.terminated then
-    ParserError('Additional keys can not be added to fully defined inline tables');
+  value := ParseValue;
+  try
+    if (length(keys) <= 1) and (parent.Find(keys[0]) <> nil) then
+      begin
+        if (value is TTOMLTable) and (TTOMLTable(value).terminated) then
+          ParserError('Inline tables can not replace partially defined tables');
+      end;
 
-  // push the last key to the parent table
-  if keys.Count > 1 then
-    begin
-      lastKey := parent.Find(keys[keys.Count - 2]);
-      if (lastKey <> nil) and (lastKey is TTOMLValue) then
-        ParserError('"'+keys[keys.Count - 2]+'" is already defined as '+TTOMLValue(lastKey).TypeString);
-    end;
+    if parent.terminated then
+      ParserError('Additional keys can not be added to fully defined inline tables');
+
+    // push the last key to the parent table
+    if Length(keys) > 1 then
+      begin
+        lastKey := parent.Find(keys[Length(keys) - 2]);
+        if (lastKey <> nil) and (lastKey is TTOMLValue) then
+          ParserError('"'+keys[Length(keys) - 2]+'" is already defined as '+TTOMLValue(lastKey).TypeString);
+      end;
+  except
+    value.Free;
+    raise;
+  end;
 
   parent.defined := true;
 
-  parent.Add(keys[keys.Count - 1], value);
+  parent.Add(keys[Length(keys) - 1], value);
 end;
 
 function TTOMLScanner.ReadDigits(digits: integer; decimals: boolean = false): string;
@@ -704,53 +718,56 @@ var
   date: TTOMLDate;
 begin
   date := TTOMLDate.Create;
+  try
+    // the parsing is being continued from a number
+    // so the year is already in the pattern buffer
+    if continueFromNumber then
+      date.year := StrToInt(TEncoding.UTF8.GetString(pattern))
+    else
+      begin
+        date.year := StrToInt(ReadDigits(4));
+        Consume('-');
+      end;
 
-  // the parsing is being continued from a number
-  // so the year is already in the pattern buffer
-  if continueFromNumber then
-    date.year := StrToInt(TEncoding.UTF8.GetString(pattern))
-  else
-    begin
-      date.year := StrToInt(ReadDigits(4));
-      Consume('-');
-    end;
+    // month
+    date.month := StrToInt(ReadDigits(2));
 
-  // month
-  date.month := StrToInt(ReadDigits(2));
+    // day
+    Consume('-');
+    date.day := StrToInt(ReadDigits(2));
 
-  // day
-  Consume('-');
-  date.day := StrToInt(ReadDigits(2));
+    // the date is a solo year
+    if IsLineEnding or IsEOF then
+      begin
+        result := date;
+        exit;
+      end;
 
-  // the date is a solo year
-  if IsLineEnding or IsEOF then
-    begin
-      result := date;
-      exit;
-    end;
+    // time seperator
+    if (c = 'T') or (c = ' ') then
+      Advance(1)
+    else
+      ParserError('Date must be separated by single space or "T".');
 
-  // time seperator
-  if (c = 'T') or (c = ' ') then
-    Advance(1)
-  else
-    ParserError('Date must be separated by single space or "T".');
+    // hour
+    date.time := ParseTime;
 
-  // hour
-  date.time := ParseTime;
+    // zulu
+    if c = 'Z' then
+      begin
+        Consume('Z');
+        date.time.z := true;
+      end;
 
-  // zulu
-  if c = 'Z' then
-    begin
-      Consume('Z');
-      date.time.z := true;
-    end;
-
-  // offset time
-  if c = '-' then
-    begin
-      Consume('-');
-      date.offset := ParseTime;
-    end;
+    // offset time
+    if c = '-' then
+      begin
+        Consume('-');
+        date.offset := ParseTime;
+      end;
+  except
+    date.Free;
+  end;
 
   pattern := [];
 
@@ -948,8 +965,13 @@ procedure TTOMLScanner.Parse;
 begin
   containers := TTOMLContainerList.Create;
   document := TTOMLDocument.Create('document');
-  containers.Add(document);
-  inherited;
+  try
+    containers.Add(document);
+    inherited;
+  except
+    FreeAndNil(document);
+    raise;
+  end;
 end;
 
 destructor TTOMLScanner.Destroy;

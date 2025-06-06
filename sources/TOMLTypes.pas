@@ -332,7 +332,8 @@ begin
 //      // TODO;
     varOleStr,
     varStrArg,
-    varString:
+    varString,
+    varUString:
       result := TJSONString.Create(value);
     varBoolean:
       result := TJSONBool.Create(Boolean(value));
