@@ -39,11 +39,8 @@ type
   TTOMLScanner = class(TScanner)
     private
       document: TTOMLDocument;
-      containers: TTOMLContainerList;
+      TableStack: TTOMLContainerList;
     private
-      function LastTable: TTOMLTable; inline;
-      procedure PopLast;
-
       function ParseArray: TTOMLArray;
       function ParseTable: TTOMLData;
       function ParseInlineTable: TTOMLTable;
@@ -98,17 +95,6 @@ begin
   result := ETOML;
 end;
 
-function TTOMLScanner.LastTable: TTOMLTable;
-begin
-  result := TTOMLTable(containers.Last);
-end;
-
-procedure TTOMLScanner.PopLast;
-begin
-  if containers.Last <> document then
-    containers.Delete(containers.Count - 1);
-end;
-
 function TTOMLScanner.ParseString: string;
 var
   quote: AnsiChar;
@@ -116,15 +102,20 @@ var
   multiline,
   literal,
   firstPass: boolean;
+  DoNotRead: Boolean;
 begin
   pattern := [];
   quote := c;
   literal := quote = '''';
   multiline := false;
   firstPass := true;
+  DoNotRead := False;
   while true do
     begin
-      ReadChar;
+      if DoNotRead then
+        DoNotRead := False
+      else
+        ReadChar;
 
       { Multi-line basic strings are surrounded by three quotation marks on each side
       and allow newlines. A newline immediately following the opening delimiter will be trimmed.
@@ -165,7 +156,6 @@ begin
         begin
           ReadChar;
 
-
           { For writing long strings without introducing extraneous whitespace,
             use a "line ending backslash". When the last non-whitespace character
             on a line is a \, it will be trimmed along with all whitespace (including newlines)
@@ -177,7 +167,10 @@ begin
             begin
               SkipSpace;
               if c <> quote then
-                pattern := pattern + [Ord(c)];
+                pattern := pattern + [Ord(c)]
+              else
+                // corner case: "line ending backslash" followed by a quote
+                DoNotRead := True;
               continue;
             end;
 
@@ -206,6 +199,7 @@ begin
                   end;
                 'U':
                   begin
+                    ReadChar;
                     scalar := StrToInt(string('$' + PeekString(8)));
                     pattern := pattern + TEncoding.Utf8.GetBytes(Char.ConvertFromUtf32(scalar));
                     Advance(8 - 1);
@@ -224,8 +218,11 @@ begin
         begin
           if multiline then
             begin
+              if Peek(quote+quote+quote+quote) then
+                // interpret the first as a quote inside the string
+                pattern := pattern + [Ord(c)]
               // end of string
-              if Peek(quote+quote) then
+              else if Peek(quote+quote+quote) then
                 begin
                   result := TEncoding.UTF8.GetString(pattern);
                   ReadTo(3);
@@ -258,8 +255,8 @@ begin
 
   //writeln('parse array of tables: ',keys.CommaText);
 
-  PopLast;
-  parent := LastTable;
+  TableStack.Pop;
+  parent := TableStack.Peek;
 
   for i := 0 to Length(keys) - 1 do
     begin
@@ -269,7 +266,6 @@ begin
           // add array as value for key and then add empty table
           arr := TTOMLArray.Create;
           child := TTOMLTable.Create(keys[i]);
-          child.parentIsArray := true;
           child.parent := parent;
           arr.Add(child);
 
@@ -293,7 +289,7 @@ begin
     end;
 
   // push table
-  containers.Add(parent);
+  TableStack.Push(parent);
   result := parent;
 
   Consume(TToken.SquareBracketClosed);
@@ -315,8 +311,8 @@ begin
 
   //writeln('parse table: ',keys.CommaText);
 
-  PopLast;
-  parent := LastTable;
+  TableStack.Pop;
+  parent := TableStack.Peek;
 
   for i := 0 to Length(keys) - 1 do
     begin
@@ -349,7 +345,7 @@ begin
   parent.defined := true;
 
   // push table
-  containers.Add(parent);
+  TableStack.Push(parent);
   result := parent;
 
   Consume(TToken.SquareBracketClosed);
@@ -368,10 +364,11 @@ begin
 
   // push new table to stack
   result := TTOMLTable.Create;
-  containers.Add(result);
+  TableStack.Push(result);
 
   try
-    repeat
+    while not TryConsume(TToken.CurlyBracketClosed) do
+    begin
       ParsePair;
 
       if TryConsume(TToken.Comma) then
@@ -381,8 +378,7 @@ begin
             ParserError('Inline tables do not allow trailing commas.');
           continue;
         end;
-    until TryConsume(TToken.CurlyBracketClosed);
-
+    end;
     // disable EOL tokens and clear the next one if it's found
     readLineEndingsAsTokens := false;
     TryConsume(TToken.EOL);
@@ -393,28 +389,34 @@ begin
 
   result.terminated := true;
 
-  PopLast;
+  TableStack.Pop;
 end;
 
 
 function TTOMLScanner.ParseArray: TTOMLArray;
 var
   value: TTOMLData;
+  oldreadLineEndingsAsTokens: Boolean;
 begin
+  oldreadLineEndingsAsTokens := readLineEndingsAsTokens;
+  readLineEndingsAsTokens := False;
+
   Consume(TToken.SquareBracketOpen);
   result := TTOMLArray.Create;
   result.terminated := true;
 
-  // the array has no values
-  if TryConsume(TToken.SquareBracketClosed) then
-    exit(result);
 
-  repeat
+  while not TryConsume(TToken.SquareBracketClosed) do
+  begin
     value := ParseValue;
     result.Add(value);
-    if TryConsume(TToken.Comma) then
-      continue;
-  until TryConsume(TToken.SquareBracketClosed);
+    if not TryConsume(TToken.Comma) then
+    begin
+      Consume(TToken.SquareBracketClosed);
+      Break;
+    end;
+  end;
+  readLineEndingsAsTokens := oldreadLineEndingsAsTokens;
 end;
 
 function TTOMLScanner.ParseValue: TTOMLData;
@@ -424,7 +426,7 @@ function TTOMLScanner.ParseValue: TTOMLData;
     valueString: string;
   begin
     result := nil;
-    valueString := TEncoding.Utf8.GetString(pattern).ToLower;
+    valueString := TEncoding.Utf8.GetString(pattern);
     if (valueString = 'false') or (valueString = 'true') then
       begin
         if negative then
@@ -447,7 +449,7 @@ function TTOMLScanner.ParseValue: TTOMLData;
       end;
   end;
 
-  function BinToInt(const S: string): Integer;
+  function BinToInt(const S: string): Int64;
   var
     i: Integer;
   begin
@@ -463,7 +465,7 @@ function TTOMLScanner.ParseValue: TTOMLData;
     end;
   end;
 
-  function OctalToInt(const S: string): Integer;
+  function OctalToInt(const S: string): Int64;
   var
     i: Integer;
   begin
@@ -485,6 +487,8 @@ function TTOMLScanner.ParseValue: TTOMLData;
 var
   negative: boolean;
 begin
+  Result := nil;
+
   case token of
     TToken.DoubleQuote:
       result := TTOMLValue.Create(ParseString);
@@ -507,14 +511,14 @@ begin
           end
         else
           begin
-            result := TTOMLNumber.Create(LongInt(StrToInt(TEncoding.UTF8.GetString(pattern))),
+            result := TTOMLNumber.Create(StrToInt64(TEncoding.UTF8.GetString(pattern)),
               TTOMLNumberType.Integer);
             Consume;
           end;
       end;
     TToken.HexadecimalNumber:
       begin
-        result := TTOMLNumber.Create(LongInt(StrToInt(TEncoding.UTF8.GetString(pattern))), TTOMLNumberType.Hexadecimal);
+        result := TTOMLNumber.Create(StrToInt64(TEncoding.UTF8.GetString(pattern)), TTOMLNumberType.Hexadecimal);
         Consume;
       end;
     TToken.OctalNumber:
@@ -575,8 +579,24 @@ begin
         end
       else if token = TToken.Integer then
         begin
-          Consume;
+          if c in ['a'..'z','A'..'Z','_','-'] then  // e.g. 2004-abc
+            Consume(['0'..'9', 'a'..'z','A'..'Z','_','-']);
           result := result + [TEncoding.UTF8.GetString(pattern)];
+          Consume;
+        end
+      else if token = TToken.RealNumber then  // e.g. 1.2   = true
+        begin
+          if c in ['a'..'z','A'..'Z','_','-'] then
+            Consume(['0'..'9', 'a'..'z','A'..'Z','_','-']);
+          result := result + TEncoding.UTF8.GetString(pattern).Split(['.']);
+          Consume;
+        end
+      else if token = TToken.Dash then
+        begin
+          if c in ['a'..'z','A'..'Z','_','-'] then
+            Consume(['0'..'9', 'a'..'z','A'..'Z','_','-']);
+          result := result + TEncoding.UTF8.GetString(pattern).Split(['.']);
+          Consume;
         end
       else
         begin
@@ -605,13 +625,11 @@ begin
 
   //writeln('parse pair: ',keys.CommaText);
 
-  parent := LastTable;
+  parent := TableStack.Peek;
 
   // add dotted keys as tables
   if Length(keys) > 1 then
     begin
-      if parent.parentIsArray then
-        parent := TTOMLTable(parent.parent);
       for i := 0 to Length(keys) - 2 do
         begin
           table := parent.Find(keys[i]);
@@ -690,7 +708,7 @@ function TTOMLScanner.ParseTime(continueFromNumber: boolean): TTOMLDate.TTime;
 begin
   // hours
   // the parsing is being continued from a number
-  // so the year is already in the pattern buffer
+  // so the hour is already in the pattern buffer
   if continueFromNumber then
     result.hours := StrToInt(TEncoding.UTF8.GetString(pattern))
   else
@@ -716,6 +734,8 @@ end;
 function TTOMLScanner.ParseDate(continueFromNumber: boolean): TTOMLDate;
 var
   date: TTOMLDate;
+  HasTime: Boolean;
+  PositiveOffset: Boolean;
 begin
   date := TTOMLDate.Create;
   try
@@ -743,30 +763,41 @@ begin
         exit;
       end;
 
-    // time seperator
-    if (c = 'T') or (c = ' ') then
-      Advance(1)
-    else
-      ParserError('Date must be separated by single space or "T".');
+    // Date must be separated by single space or "T" from time
+    // but time may be missing
 
-    // hour
-    date.time := ParseTime;
+    HasTime := UpCase(c) = 'T';
+    if HasTime or (c = ' ') then
+    begin
+      Advance(1);
 
-    // zulu
-    if c = 'Z' then
+      HasTime := HasTime or (c in ['0'..'9']);
+      if HasTime then
       begin
-        Consume('Z');
-        date.time.z := true;
-      end;
+        // hour
+        date.time := ParseTime;
 
-    // offset time
-    if c = '-' then
-      begin
-        Consume('-');
-        date.offset := ParseTime;
+        // zulu
+        if UpCase(c) = 'Z' then
+        begin
+          Advance(1);
+          date.time.z := true;
+        end;
+
+        // offset time
+        if c in ['+', '-'] then
+        begin
+          PositiveOffset := c = '+';
+          Advance(1);;
+          date.offset := ParseTime;
+          if PositiveOffset then
+            date.offset.hours := -date.offset.hours;
+        end;
       end;
+    end;
   except
     date.Free;
+    raise;
   end;
 
   pattern := [];
@@ -844,7 +875,7 @@ begin
           AdvancePattern(2);
           while true do
             begin
-              if c in ['A'..'F','a'..'f','_'] then
+              if c in ['0'..'9', 'A'..'F','a'..'f','_'] then
                 begin
                   if c = '_' then
                     begin
@@ -875,7 +906,7 @@ begin
           if (c = '-') or (c = '+') then
             AdvancePattern;
           found := false;
-          while c in ['0'..'9'] do
+          while c in ['0'..'9', '_'] do
             begin
               found := true;
               if c = '_' then
@@ -887,6 +918,7 @@ begin
                   continue;
                 end;
               AdvancePattern;
+              underscore := false;
             end;
           if not found then
             ParserError('Exponent must be followed by an integer');
@@ -952,8 +984,10 @@ begin
     // key/value pairs can be ID, Integer (non-negative) or strings (see ParseKey)
     TToken.ID,
     TToken.Integer,
+    TToken.RealNumber,
     TToken.DoubleQuote,
-    TToken.SingleQuote:
+    TToken.SingleQuote,
+    TToken.Dash:
       ParsePair;
     else
       if token <> TToken.EOF then
@@ -963,10 +997,13 @@ end;
 
 procedure TTOMLScanner.Parse;
 begin
-  containers := TTOMLContainerList.Create;
+  TableStack := TTOMLContainerList.Create;
   document := TTOMLDocument.Create('document');
   try
-    containers.Add(document);
+    // Push twice so that it stays at the top once the document
+    // key/value pair are processed and the first subtable is found
+    TableStack.Push(document);
+    TableStack.Push(document);
     inherited;
   except
     FreeAndNil(document);
@@ -976,7 +1013,7 @@ end;
 
 destructor TTOMLScanner.Destroy;
 begin
-  containers.Free;
+  TableStack.Free;
 
   inherited;
 end;

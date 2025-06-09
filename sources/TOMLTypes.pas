@@ -143,7 +143,6 @@ type
   { TTOMLContainer }
 
   TTOMLContainer = class(TTOMLData);
-  TTOMLContainerList = TList<TTOMLContainer>;
 
   { TTOMLArray }
 
@@ -180,7 +179,6 @@ type
     public
       defined: boolean;
       terminated: boolean;
-      parentIsArray: boolean;
     public
       constructor Create(name: string = '');
       destructor Destroy; override;
@@ -199,6 +197,8 @@ type
       property Keys[Index: Integer]: string read GetKey;
       property Values[Index: Integer]: TTOMLData read GetItem;
   end;
+
+  TTOMLContainerList = TStack<TTOMLTable>;
 
   { TTOMLDocument }
 

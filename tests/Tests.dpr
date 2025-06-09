@@ -8,10 +8,12 @@
 
 program Tests;
 uses
+  WinApi.Windows,
   System.SysUtils,
   System.Classes,
   System.IOUtils,
   System.JSON,
+  System.Generics.Collections,
   Scanner in '..\sources\Scanner.pas',
   TOMLParser in '..\sources\TOMLParser.pas',
   TOMLTypes in '..\sources\TOMLTypes.pas',
@@ -75,63 +77,118 @@ begin
 end;
 
 
+var
+  BasePath: string;
+  CompatibleTests: TStringList;
+
+
 procedure RunTests(dir: string; expectedFail: boolean; showJSON: boolean = false);
+
+  procedure OutputResult(IsSuccess: Boolean; FileInfo: string;  ExcMsg: string  = '');
+  var
+    Mark: string;
+  begin
+    if IsSuccess  then
+      Mark := #$2714
+    else
+      Mark := #$2716;
+   Write(Mark + '  ' + FileInfo);
+   if ExcMsg <> '' then
+     Write(': ' + ExcMsg);
+   WriteLn;
+  end;
+
 var
   Files: Tarray<string>;
-  name, ext, path: string;
+  name, parentdir, path: string;
   contents: TBytes;
   doc: TTOMLDocument;
   json: TJSONValue;
+  Succeeded, Failed, Completed: Integer;
+  FileInfo: string;
 begin
   dir := ExpandFileName(dir);
   Files := TDirectory.GetFiles(dir, '*.toml', TSearchOption.soAllDirectories);
 
+  Succeeded := 0;
+  Failed := 0;
+  Completed := 0;
+
   for path in files do
     begin
-      name := ExtractFileName(path);
-      ext := ExtractFileExt(path);
-      if ext = '.toml' then
+      if not CompatibleTests.Contains(
+        Copy(path, Length(BasePath) + 2).Replace('\', '/', [rfReplaceAll]))
+      then
+        Continue;
+
+
+      name := TPath.GetFileName(path);
+      parentdir := TPath.GetFileName(TPath.GetDirectoryName(path));
+      FileInfo := TPath.Combine(parentdir, name);
+
+      Inc(Completed);
+      doc := nil;
+      contents := TFile.ReadAllBytes(path);
+      try
+        doc := GetTOML(contents);
+        if expectedFail then
         begin
-          write(ExtractFileName(dir), '/', name);
-          doc := nil;
-          contents := TFile.ReadAllBytes(path);
-          try
-            doc := GetTOML(contents);
-            if expectedFail then
-              begin
-                doc.Free;
-                WriteLn(' '#$D7'  Failed!');
-                ReadLn;
-                Halt;
-              end;
-          except
-            on E: Exception do
-              begin
-                if not expectedFail then
-                  begin
-                    doc.Free;
-                    WriteLn(' '#$D7' ', E.Message);
-                    ReadLn;
-                    Halt;
-                  end;
-              end;
-          end;
-          writeln(' '#$2713);
-          if showJSON then
-            begin
-              json := doc.AsJSON;
-              writeln(json.Format);
-              json.Free;
-            end;
-          doc.Free;
+          OutputResult(False, FileInfo);
+          Inc(Failed)
+        end
+        else
+        begin
+          Inc(Succeeded);
+          //OutputResult(True, FileInfo);
         end;
+      except
+        on E: Exception do
+          begin
+            if not expectedFail then
+            begin
+              Inc(Failed);
+              OutputResult(False, FileInfo, E.Message);
+            end
+            else
+            begin
+              Inc(Succeeded);
+              //OutputResult(True, FileInfo);
+            end;
+          end;
+      end;
+      if showJSON and Assigned(doc) then
+        begin
+          json := doc.AsJSON;
+          writeln(json.Format);
+          json.Free;
+        end;
+      doc.Free;
     end;
-  writeln(#$2713' All tests passed!');
+
+  WriteLn;
+  WriteLn(Format('Completed: %d, Succeeded: %d, Failed: %d',
+    [Completed, Succeeded, Failed]));
+  if Failed = 0 then
+    writeln(#$2713' All tests passed!');
 end;
 
 begin
+
   ReportMemoryLeaksOnShutdown := True;
-  RunTests('./pass', false, false);
-  RunTests('./fail', true);
+  SetConsoleOutputCP(CP_UTF8);
+
+  BasePath := 'C:\Delphi\Components\toml-delphi\tests\toml-test\tests';
+
+  CompatibleTests := TStringList.Create;
+  CompatibleTests.LoadFromFile(TPath.Combine(BasePath, 'files-toml-1.0.0'));
+
+  RunTests(TPath.Combine(BasePath, 'valid'), False, False);
+  RunTests(TPath.Combine(BasePath, 'invalid'), True, False);
+//  RunTests('./pass', false, false);
+//  RunTests('./fail', true);
+
+  CompatibleTests.Free;
+
   ReadLn;
+
 end.

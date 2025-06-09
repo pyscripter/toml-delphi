@@ -80,6 +80,7 @@ type
       procedure Consume; overload; inline;
       procedure Consume(t: TToken); overload;
       procedure Consume(inChar: AnsiChar); overload;
+      procedure Consume(charset: TSysCharSet); overload;
       function TryConsume(t: TToken): boolean; overload;
       function TryConsume(t: TToken; out s: string): boolean; overload; inline;
 
@@ -126,7 +127,7 @@ implementation
 const
   TCharSetLineEnding = [#10, #12, #13];
   TCharSetWhiteSpace = [#32, #9];
-  TCharSetWord =       ['a'..'z','A'..'Z','_'];
+  TCharSetWord =       ['a'..'z','A'..'Z','_','-'];
   TCharSetInteger =    ['0'..'9'];
   TCharSetQuotes =     ['"', ''''];
 
@@ -191,6 +192,15 @@ begin
 	  AdvancePattern
 	else
 		ParserError('Got "'+ Char(c) + '", expected "' + Char(inChar) + '"');
+end;
+
+procedure TScanner.Consume(charset: TSysCharSet);
+begin
+  if not (c in charset) then
+		ParserError('Unexpected character "'+ Char(c) + '"')
+  else
+    while c in charset do
+      AdvancePattern;
 end;
 
 function TScanner.TryConsume(t: TToken; out s: string): boolean;
