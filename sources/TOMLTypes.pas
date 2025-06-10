@@ -391,15 +391,19 @@ end;
 function TTOMLDate.ToISO8601String(roundSeconds: boolean): string;
 var
   s: string;
+  date: TDateTime;
 begin
-
-  result := Format('%.*d',[4, year])+'-'+
-            Format('%.*d',[2, month])+'-'+
-            Format('%.*d',[2, day]);
+  if TryEncodeDate(Year, Month, Day, date) then
+  begin
+    result := Format('%.4d-%.2d-%.2d', [year, month, date]);
+    if time.IsSet then
+      Result := Result + 'T';
+  end
+  else
+    Result := '';
 
   if time.IsSet then
     begin
-      result := result + 'T';
       result := result + Format('%.*d',[2, time.hours])+':'+
                 Format('%.*d',[2, time.minutes])+':';
 

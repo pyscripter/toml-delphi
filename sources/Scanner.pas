@@ -3,7 +3,7 @@
 
     This unit implements a basic tokenizer
 
-		********************************************************************
+    ********************************************************************
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -25,20 +25,20 @@ unit Scanner;
 interface
 
 uses
-	System.SysUtils;
+  System.SysUtils;
 
 type
-	EScanner = class(Exception);
+  EScanner = class(Exception);
 
-	EScannerClass = class of EScanner;
+  EScannerClass = class of EScanner;
 
-	TScanner = class
-    private type
+  TScanner = class
+    protected type
       TFileInfo = record
         line: integer;
         column: integer;
       end;
-    private
+    protected
       currentIndex: integer;
       fileInfo: TFileInfo;
       consumedLineEnding: boolean;
@@ -93,14 +93,15 @@ type
       procedure ReadUntilEOL;
       procedure SkipSpace;
 
-			function IsLineEnding: boolean;
+      function IsLineEnding: boolean;
       function IsEOF: Boolean;
-			function IsWhiteSpace: boolean;
+      function IsWhiteSpace: boolean;
+      function WhiteSpaceTillEOL: boolean;
 
       procedure Advance(count: integer);
       procedure AdvancePattern(count: integer = 1);
 
-     	function Peek(offset: integer = 1): AnsiChar; overload;
+       function Peek(offset: integer = 1): AnsiChar; overload;
       function Peek(str: AnsiString; offset: integer = 0): boolean; overload;
       function PeekString(count: integer): AnsiString;
 
@@ -111,11 +112,11 @@ type
       { Handlers }
       procedure ParseToken; virtual; abstract;
       procedure UnknownCharacter(out cont: boolean); virtual;
-		public
+    public
       constructor Create(Bytes: TBytes);
-			procedure Parse; virtual;
-			destructor Destroy; override;
-	end;
+      procedure Parse; virtual;
+      destructor Destroy; override;
+  end;
 
 type
   TTokenMethods = record helper for TScanner.TToken
@@ -125,7 +126,7 @@ type
 implementation
 
 const
-  TCharSetLineEnding = [#10, #12, #13];
+  TCharSetLineEnding = [#10, #13];
   TCharSetWhiteSpace = [#32, #9];
   TCharSetWord =       ['a'..'z','A'..'Z','_','-'];
   TCharSetInteger =    ['0'..'9'];
@@ -133,71 +134,71 @@ const
 
 function TTokenMethods.ToString: string;
 begin
-	case self of
-		TScanner.TToken.ID:
-			result := 'ID';
-		TScanner.TToken.Integer:
-			result := 'Integer';
-		TScanner.TToken.RealNumber:
-			result := 'Real';
-		TScanner.TToken.DoubleQuote:
-			result := '"';
-		TScanner.TToken.SingleQuote:
-			result := '''';
-		TScanner.TToken.SquareBracketOpen:
-			result := '[';
-		TScanner.TToken.SquareBracketClosed:
-			result := ']';
-		TScanner.TToken.CurlyBracketOpen:
-			result := '{';
-		TScanner.TToken.CurlyBracketClosed:
-			result := '}';
-		TScanner.TToken.Equals:
-			result := '=';
-		TScanner.TToken.Comma:
-			result := ',';
-		TScanner.TToken.BackSlash:
-			result := '\';
-		TScanner.TToken.Dash:
-			result := '-';
-		TScanner.TToken.Dot:
-			result := '.';
-		TScanner.TToken.Plus:
-			result := '+';
-		TScanner.TToken.EOF:
-			result := 'End of File';
-		TScanner.TToken.EOL:
-			result := 'End of Line';
+  case self of
+    TScanner.TToken.ID:
+      result := 'ID';
+    TScanner.TToken.Integer:
+      result := 'Integer';
+    TScanner.TToken.RealNumber:
+      result := 'Real';
+    TScanner.TToken.DoubleQuote:
+      result := '"';
+    TScanner.TToken.SingleQuote:
+      result := '''';
+    TScanner.TToken.SquareBracketOpen:
+      result := '[';
+    TScanner.TToken.SquareBracketClosed:
+      result := ']';
+    TScanner.TToken.CurlyBracketOpen:
+      result := '{';
+    TScanner.TToken.CurlyBracketClosed:
+      result := '}';
+    TScanner.TToken.Equals:
+      result := '=';
+    TScanner.TToken.Comma:
+      result := ',';
+    TScanner.TToken.BackSlash:
+      result := '\';
+    TScanner.TToken.Dash:
+      result := '-';
+    TScanner.TToken.Dot:
+      result := '.';
+    TScanner.TToken.Plus:
+      result := '+';
+    TScanner.TToken.EOF:
+      result := 'End of File';
+    TScanner.TToken.EOL:
+      result := 'End of Line';
     else
-			raise exception.create('invalid token');
-	end;
+      raise exception.create('invalid token');
+  end;
 end;
 
 procedure TScanner.Consume;
 begin
-	Consume(token);
+  Consume(token);
 end;
 
 procedure TScanner.Consume(t: TToken);
 begin
-	if token = t then
-	  ReadToken
-	else
-		ParserError('Got "'+ token.ToString + '", expected "' + t.ToString+'"');
+  if token = t then
+    ReadToken
+  else
+    ParserError('Got "'+ token.ToString + '", expected "' + t.ToString+'"');
 end;
 
 procedure TScanner.Consume(inChar: AnsiChar);
 begin
-	if c = inChar then
-	  AdvancePattern
-	else
-		ParserError('Got "'+ Char(c) + '", expected "' + Char(inChar) + '"');
+  if c = inChar then
+    AdvancePattern
+  else
+    ParserError('Got "'+ Char(c) + '", expected "' + Char(inChar) + '"');
 end;
 
 procedure TScanner.Consume(charset: TSysCharSet);
 begin
   if not (c in charset) then
-		ParserError('Unexpected character "'+ Char(c) + '"')
+    ParserError('Unexpected character "'+ Char(c) + '"')
   else
     while c in charset do
       AdvancePattern;
@@ -205,37 +206,49 @@ end;
 
 function TScanner.TryConsume(t: TToken; out s: string): boolean;
 begin
-	s := TEncoding.UTF8.GetString(pattern);
-	result := TryConsume(t);
+  s := TEncoding.UTF8.GetString(pattern);
+  result := TryConsume(t);
 end;
 
 function TScanner.TryConsume(t: TToken): boolean;
 begin
-	if token = t then
-	  begin
-	  	ReadToken;
-	  	result := true;
-	  end
-	else
-		result := false;
+  if token = t then
+    begin
+      ReadToken;
+      result := true;
+    end
+  else
+    result := false;
 end;
 
 procedure TScanner.ReadUntilEOL;
 begin
-	repeat
-		ReadChar;
-	until IsLineEnding or IsEOF;
+  repeat
+    ReadChar;
+  until IsLineEnding or IsEOF;
 end;
 
 procedure TScanner.SkipSpace;
 begin
-	consumedLineEnding := false;
-	while IsWhiteSpace do
-		begin
-			if IsLineEnding then
-				consumedLineEnding := true;
-			ReadChar;
-		end;
+  consumedLineEnding := false;
+  while True do
+  begin
+    if c in TCharSetWhiteSpace then
+      ReadChar
+    else if c in TCharSetLineEnding then
+    begin
+      if c = #13 then
+      begin
+        ReadChar;
+        if c <>  #10 then
+          ParserError('Invalid line end: CR without LF');
+      end;
+      consumedLineEnding := true;
+      ReadChar;
+    end
+    else
+      Break;
+  end;
 end;
 
 function TScanner.IsEOF: Boolean;
@@ -245,267 +258,284 @@ end;
 
 function TScanner.IsLineEnding: boolean;
 begin
-	result := c in TCharSetLineEnding;
+  result := c in TCharSetLineEnding;
 end;
 
 function TScanner.IsWhiteSpace: boolean;
 begin
-	result := (c in TCharSetWhiteSpace) or IsLineEnding;
+  result := (c in TCharSetWhiteSpace) or IsLineEnding;
 end;
 
 function TScanner.Peek(offset: integer = 1): AnsiChar;
 begin
-	if currentIndex + offset < length(contents) then
-		result := AnsiChar(contents[currentIndex + offset])
-	else
-		result := #0;
+  if currentIndex + offset < length(contents) then
+    result := AnsiChar(contents[currentIndex + offset])
+  else
+    result := #0;
 end;
 
 function TScanner.Peek(str: AnsiString; offset: integer = 0): boolean;
 var
-	i, contentsOffset: integer;
+  i, contentsOffset: integer;
 begin
-	result := false;
-	for i := 0 to length(str) - 1 do
-		begin
-			contentsOffset := currentIndex + offset + i;
-			if (contentsOffset < length(contents)) and (contents[contentsOffset] = Ord(str[i + 1])) then
-				result := true
-			else
-				exit(false);
-		end;
+  result := false;
+  for i := 0 to length(str) - 1 do
+    begin
+      contentsOffset := currentIndex + offset + i;
+      if (contentsOffset < length(contents)) and (contents[contentsOffset] = Ord(str[i + 1])) then
+        result := true
+      else
+        exit(false);
+    end;
 end;
 
 function TScanner.PeekString(count: integer): AnsiString;
 var
-	i: integer;
+  i: integer;
 begin
-	result := '';
-	for i := 0 to count - 1 do
-		result := result + AnsiChar(contents[currentIndex + i]);
+  result := '';
+  for i := 0 to count - 1 do
+    result := result + AnsiChar(contents[currentIndex + i]);
 end;
 
 function TScanner.ReadChar: AnsiChar;
 begin
-	if IsLineEnding then
-		begin
-			Inc(fileInfo.line);
-			fileInfo.column := 0;
-		end;
-	Inc(currentIndex);
-	c := AnsiChar(contents[currentIndex]);
-	Inc(fileInfo.column);
-	result := c;
+  if IsLineEnding then
+    begin
+      Inc(fileInfo.line);
+      fileInfo.column := 0;
+    end;
+  Inc(currentIndex);
+  c := AnsiChar(contents[currentIndex]);
+  Inc(fileInfo.column);
+  result := c;
 end;
 
 function TScanner.ReadWord: TIdentifier;
 begin
-	pattern := [];
-	while c in TCharSetWord + TCharSetInteger do
-		begin
-			pattern := pattern + [Ord(c)];
-			ReadChar;
-		end;
-	result := TEncoding.UTF8.GetString(pattern);
+  pattern := [];
+  while c in TCharSetWord + TCharSetInteger do
+    begin
+      pattern := pattern + [Ord(c)];
+      ReadChar;
+    end;
+  result := TEncoding.UTF8.GetString(pattern);
 end;
 
 
 { Appends character the current pattern and reads next character }
 procedure TScanner.AdvancePattern(count: integer = 1);
 begin
-	while count > 0 do
-		begin
-			pattern := pattern + [Ord(c)];
-			ReadChar;
-			Dec(count);
-		end;
+  while count > 0 do
+    begin
+      pattern := pattern + [Ord(c)];
+      ReadChar;
+      Dec(count);
+    end;
 end;
 
 { Moves the scanner by 'count' characters }
 procedure TScanner.Advance(count: integer);
 begin
-	while count > 0 do 
-		begin
-			ReadChar;
-			Dec(count);
-		end;
+  while count > 0 do
+    begin
+      ReadChar;
+      Dec(count);
+    end;
 end;
 
 { Advances by "count" and reads token at new position }
 function TScanner.ReadTo(count: integer): TToken;
 begin
-	Advance(count);
-	result := ReadToken;
+  Advance(count);
+  result := ReadToken;
 end;
 
 
 function TScanner.ReadNumber: string;
 begin
-	pattern := [];
-	token := TToken.Integer;
+  pattern := [];
+  token := TToken.Integer;
 
-	if c = '-' then
-		AdvancePattern;
+  if c = '-' then
+    AdvancePattern;
 
-	if c = '+' then
-		AdvancePattern;
+  if c = '+' then
+    AdvancePattern;
 
-	while c in TCharSetInteger + ['.', 'e'] do
-		begin
-			// TODO: must be followed by a number!
-			if c = 'e' then
-				begin
-					AdvancePattern;
-					if c = '-' then
-						begin
-							AdvancePattern;
-							while c in TCharSetInteger do
-							  AdvancePattern;
-							 break;
-						end;
-				end
-			else if c = '.' then
-				token := TToken.RealNumber;
-			AdvancePattern;
-		end;
+  while c in TCharSetInteger + ['.', 'e'] do
+    begin
+      // TODO: must be followed by a number!
+      if c = 'e' then
+        begin
+          AdvancePattern;
+          if c = '-' then
+            begin
+              AdvancePattern;
+              while c in TCharSetInteger do
+                AdvancePattern;
+               break;
+            end;
+        end
+      else if c = '.' then
+        token := TToken.RealNumber;
+      AdvancePattern;
+    end;
 
-	result := TEncoding.UTF8.GetString(pattern);
+  result := TEncoding.UTF8.GetString(pattern);
 end;
 
 function TScanner.GetException: EScannerClass;
 begin
-	result := EScanner;
+  result := EScanner;
 end;
 
 procedure TScanner.ParserError(messageString: string = '');
 begin
-	// in case we pass in line ending from the current character "c"
-	// replace these with something human readable
-	messageString := StringReplace(messageString, #10, 'EOL', []);
-	messageString := StringReplace(messageString, #12, 'EOL', []);
-	messageString := StringReplace(messageString, #13, 'EOL', []);
-	raise GetException.Create('Error at '+IntToStr(fileInfo.line)+':'+IntToStr(fileInfo.column)+': '+messageString);
+  // in case we pass in line ending from the current character "c"
+  // replace these with something human readable
+  messageString := StringReplace(messageString, #10, 'EOL', []);
+  messageString := StringReplace(messageString, #12, 'EOL', []);
+  messageString := StringReplace(messageString, #13, 'EOL', []);
+  raise GetException.Create('Error at '+IntToStr(fileInfo.line)+':'+IntToStr(fileInfo.column)+': '+messageString);
 end;
 
 procedure TScanner.UnknownCharacter(out cont: boolean);
 begin
-	ParserError('Unknown character "'+ c + '"');
+  ParserError('Unknown character "'+ c + '"');
+end;
+
+function TScanner.WhiteSpaceTillEOL: boolean;
+var
+  ch: AnsiChar;
+  Index: Integer;
+begin
+  Result := True;
+  ch := c;
+  Index := 1;
+
+  while not (ch in TCharSetLineEnding + [#0])  do
+  begin
+    if not (ch in TCharSetWhiteSpace) then
+      Exit(False);
+    ch := Peek(Index);
+    Inc(Index);
+  end;
 end;
 
 function TScanner.ReadToken: TToken;
 var
   cont: boolean;
 begin
-	token := TToken.EOF;
+  token := TToken.EOF;
 
-	while (currentIndex < length(contents) - 1) and (token = TToken.EOF) do
-		begin
-			//writeln('  ', currentIndex, ':', c);
-			case c of
-			  '+':
-			  	begin
-			  		if Peek in TCharSetInteger then
-		  				ReadNumber
-			  		else
-			  			begin
-			  				token := TToken.Plus;
-			  				ReadChar;
-			  			end;
-			  	end;
-				'-':
-					begin
-						if Peek in TCharSetInteger then
-              ReadNumber
-						else
-							begin
-								token := TToken.Dash;
-								ReadChar;
-							end;
-					end;
-				'0'..'9':
-  				ReadNumber;
-				'a'..'z','A'..'Z','_':
-					begin
-						token := TToken.ID;
-						ReadWord;
-					end;
-				'[':
-					begin
-						token := TToken.SquareBracketOpen;
-						ReadChar;
-					end;
-				']':
-					begin
-						token := TToken.SquareBracketClosed;
-						ReadChar;
-					end;
-				'{':
-					begin
-						token := TToken.CurlyBracketOpen;
-						ReadChar;
-					end;
-				'}':
-					begin
-						token := TToken.CurlyBracketClosed;
-						ReadChar;
-					end;
-				'=':
-					begin
-						token := TToken.Equals;
-						ReadChar;
-					end;
-				',':
-					begin
-						token := TToken.Comma;
-						ReadChar;
-					end;
-				'.':
-					begin
-						token := TToken.Dot;
-						ReadChar;
-					end;
-				'\':
-				  begin
-				  	token := TToken.BackSlash;
-				  	ReadChar;
-				  end;
-				#10, #12, #13,
-				#32, #9:
+  while (currentIndex < length(contents) - 1) and (token = TToken.EOF) do
+    begin
+      //writeln('  ', currentIndex, ':', c);
+      case c of
+        '+':
           begin
-  					SkipSpace;
+            if Peek in TCharSetInteger then
+              ReadNumber
+            else
+              begin
+                token := TToken.Plus;
+                ReadChar;
+              end;
+          end;
+        '-':
+          begin
+            if Peek in TCharSetInteger then
+              ReadNumber
+            else
+              begin
+                token := TToken.Dash;
+                ReadChar;
+              end;
+          end;
+        '0'..'9':
+          ReadNumber;
+        'a'..'z','A'..'Z','_':
+          begin
+            token := TToken.ID;
+            ReadWord;
+          end;
+        '[':
+          begin
+            token := TToken.SquareBracketOpen;
+            ReadChar;
+          end;
+        ']':
+          begin
+            token := TToken.SquareBracketClosed;
+            ReadChar;
+          end;
+        '{':
+          begin
+            token := TToken.CurlyBracketOpen;
+            ReadChar;
+          end;
+        '}':
+          begin
+            token := TToken.CurlyBracketClosed;
+            ReadChar;
+          end;
+        '=':
+          begin
+            token := TToken.Equals;
+            ReadChar;
+          end;
+        ',':
+          begin
+            token := TToken.Comma;
+            ReadChar;
+          end;
+        '.':
+          begin
+            token := TToken.Dot;
+            ReadChar;
+          end;
+        '\':
+          begin
+            token := TToken.BackSlash;
+            ReadChar;
+          end;
+        #10, #13, #32, #9:
+          begin
+            SkipSpace;
             if consumedLineEnding and readLineEndingsAsTokens then
               begin
                 token := TToken.EOL;
                 consumedLineEnding := false;
               end;
           end;
-				else
-					begin
-						cont := false;
+        else
+          begin
+            cont := false;
             UnknownCharacter(cont);
             if cont then
-            	continue;
+              continue;
           end;
-			end;
-		end;
+      end;
+    end;
 
-		result := token;
+    result := token;
 end;
 
 procedure TScanner.Parse;
 begin
-	ReadToken;
+  ReadToken;
   while token <> TToken.EOF do
     ParseToken;
 end;
 
 constructor TScanner.Create(Bytes: TBytes);
 begin
-	contents := Bytes + [0];
-	currentIndex := 0;
-	fileInfo.line := 1;
-	fileInfo.column := 1;
-	c := AnsiChar(contents[currentIndex]);
+  contents := Bytes + [0];
+  currentIndex := 0;
+  fileInfo.line := 1;
+  fileInfo.column := 1;
+  c := AnsiChar(contents[currentIndex]);
 end;
 
 destructor TScanner.Destroy;

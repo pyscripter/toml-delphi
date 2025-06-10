@@ -121,7 +121,6 @@ begin
       then
         Continue;
 
-
       name := TPath.GetFileName(path);
       parentdir := TPath.GetFileName(TPath.GetDirectoryName(path));
       FileInfo := TPath.Combine(parentdir, name);
@@ -129,6 +128,7 @@ begin
       Inc(Completed);
       doc := nil;
       contents := TFile.ReadAllBytes(path);
+
       try
         doc := GetTOML(contents);
         if expectedFail then
@@ -170,6 +170,7 @@ begin
     [Completed, Succeeded, Failed]));
   if Failed = 0 then
     writeln(#$2713' All tests passed!');
+  WriteLn;
 end;
 
 begin

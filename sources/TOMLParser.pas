@@ -45,9 +45,10 @@ type
       function ParseTable: TTOMLData;
       function ParseInlineTable: TTOMLTable;
       function ParseArrayOfTables: TTOMLData;
-      function ParseString: string;
+      function ParseString(AllowMultiline: Boolean = True): string;
       function ParseDate(continueFromNumber: boolean = false): TTOMLDate;
-      function ParseTime(continueFromNumber: boolean = false): TTOMLDate.TTime;
+      function ParseTime(continueFromNumber: boolean = false;
+        IsOffset: Boolean = False): TTOMLDate.TTime;
       procedure ParsePair;
       function ParseValue: TTOMLData;
       function ParseKey: TArray<string>;
@@ -80,6 +81,10 @@ var
   parser: TTOMLScanner;
 begin
   parser := TTOMLScanner.Create(contents);
+
+  // check whether the input is valid utf8
+  if not TEncoding.UTF8.IsBufferValid(contents) then
+    parser.ParserError('The input is not valid utf8');
   try
     parser.Parse;
     result := parser.document;
@@ -95,7 +100,7 @@ begin
   result := ETOML;
 end;
 
-function TTOMLScanner.ParseString: string;
+function TTOMLScanner.ParseString(AllowMultiline: Boolean = True): string;
 var
   quote: AnsiChar;
   scalar: Cardinal;
@@ -117,6 +122,20 @@ begin
       else
         ReadChar;
 
+      // Control character validation
+      if (c in [#$0..#$8,#$A..#$1F, #$7F]) and not (multiline and IsLineEnding) then
+        ParserError(Format('Invalid character "#%d in string', [Ord(c)]));
+
+      // EOL validation
+      if c = #13 then
+      begin
+        AdvancePattern;
+        if c <>  #10 then
+          ParserError('Invalid line end: CR without LF');
+        AdvancePattern;
+        Continue;
+      end;
+
       { Multi-line basic strings are surrounded by three quotation marks on each side
       and allow newlines. A newline immediately following the opening delimiter will be trimmed.
       All other whitespace and newline characters remain intact. }
@@ -126,6 +145,8 @@ begin
           firstPass := false;
           if c = quote then
             begin
+              if not AllowMultiline then
+                ParserError('Invalid use of multiline strings');
               multiline := true;
               // trim first new line
               if Peek(sLineBreak, 1) then
@@ -163,7 +184,7 @@ begin
             All of the escape sequences that are valid for basic strings are
             also valid for multi-line basic strings. }
 
-          if IsLineEnding then
+          if WhiteSpaceTillEOL then
             begin
               SkipSpace;
               if c <> quote then
@@ -177,57 +198,74 @@ begin
           // escaped quotes
           if c = quote then
             pattern := pattern + [Ord(c)]
-          else if c in ['b', 't', 'n', 'f', 'r', 'u', 'U'] then
-            begin
-              case c of
-                'b':
-                  pattern := pattern + [8];
-                't':
-                  pattern := pattern + [9];
-                'n':
-                  pattern := pattern + [10];
-                'f':
-                  pattern := pattern + [12];
-                'r':
-                  pattern := pattern + [13];
-                'u':
-                  begin
-                    ReadChar;
-                    scalar := StrToInt(string('$' + PeekString(4)));
-                    pattern := pattern + TEncoding.Utf8.GetBytes(Char(scalar));
-                    Advance(4 - 1);
-                  end;
-                'U':
-                  begin
-                    ReadChar;
-                    scalar := StrToInt(string('$' + PeekString(8)));
-                    pattern := pattern + TEncoding.Utf8.GetBytes(Char.ConvertFromUtf32(scalar));
-                    Advance(8 - 1);
-                  end;
-              end;
-            end;
+          else
+            case c of
+              'b':
+                pattern := pattern + [8];
+              't':
+                pattern := pattern + [9];
+              'n':
+                pattern := pattern + [10];
+              'f':
+                pattern := pattern + [12];
+              'r':
+                pattern := pattern + [13];
+              '\':
+                pattern := pattern + [Ord(c)];
+              'u':
+                begin
+                  ReadChar;
+                  scalar := StrToInt(string('$' + PeekString(4)));
+                  if Char(scalar).IsSurrogate then
+                    ParserError('Unicode characters need to be unicode scalars');
+                  pattern := pattern + TEncoding.Utf8.GetBytes(Char(scalar));
+                  Advance(4 - 1);
+                end;
+              'U':
+                begin
+                  ReadChar;
+                  scalar := StrToInt(string('$' + PeekString(8)));
+                  pattern := pattern + TEncoding.Utf8.GetBytes(Char.ConvertFromUtf32(scalar));
+                  Advance(8 - 1);
+                end;
+            else
+              ParserError('Bad string escape char: "' + c + '"');
+            end
         end
       // line breaks are not allowed
       else if not multiline and IsLineEnding then
         ParserError('Single line strings must not contain line endings (#'+IntToStr(ord(c))+')')
       // join any character that isn't a quote
       else if c <> quote then
-        pattern := pattern +  [Ord(c)]
+        pattern := pattern + [Ord(c)]
       // terminate string
       else if c = quote then
         begin
           if multiline then
+            // Up to 5 concequtive quotes are allowed
             begin
-              if Peek(quote+quote+quote+quote) then
+              if Peek(quote+quote+quote+quote+quote) then
+              begin
+                pattern := pattern + [Ord(c), Ord(c)];
+                result := TEncoding.UTF8.GetString(pattern);
+                ReadTo(5);
+                exit;
+              end
+              else if Peek(quote+quote+quote+quote) then
+              begin
                 // interpret the first as a quote inside the string
-                pattern := pattern + [Ord(c)]
+                pattern := pattern + [Ord(c)];
+                result := TEncoding.UTF8.GetString(pattern);
+                ReadTo(4);
+                exit;
+              end
               // end of string
               else if Peek(quote+quote+quote) then
-                begin
-                  result := TEncoding.UTF8.GetString(pattern);
-                  ReadTo(3);
-                  exit;
-                end
+              begin
+                result := TEncoding.UTF8.GetString(pattern);
+                ReadTo(3);
+                exit;
+              end
               else
                 pattern := pattern + [Ord(c)];
             end
@@ -249,7 +287,11 @@ var
   parent, child: TTOMLTable;
   arr: TTOMLArray;
   i: integer;
+  StartLine: Integer;
 begin
+  StartLine := fileInfo.line;
+
+  Consume(TToken.SquareBracketOpen);
   Consume(TToken.SquareBracketOpen);
   keys := ParseKey;
 
@@ -292,8 +334,18 @@ begin
   TableStack.Push(parent);
   result := parent;
 
+  if c <>  ']' then
+    ParserError('Table array headers must end with "]]"');
+
   Consume(TToken.SquareBracketClosed);
+
+  if (fileInfo.Line > StartLine) then
+    ParserError('Table array headers must be on a single line');
+
   Consume(TToken.SquareBracketClosed);
+
+  if (token <> TToken.EOF) and (fileInfo.Line = StartLine) then
+    ParserError('Table array headers must finish with EOL');
 end;
 
 function TTOMLScanner.ParseTable: TTOMLData;
@@ -302,11 +354,15 @@ var
   table: TTOMLData;
   parent, child: TTOMLTable;
   i: integer;
+  StartLine: Integer;
 begin
+  StartLine := fileInfo.line;
+
+  if c = '[' then
+    exit(ParseArrayOfTables);
+
   Consume(TToken.SquareBracketOpen);
   // parse array of tables
-  if token = TToken.SquareBracketOpen then
-    exit(ParseArrayOfTables);
   keys := ParseKey;
 
   //writeln('parse table: ',keys.CommaText);
@@ -348,7 +404,13 @@ begin
   TableStack.Push(parent);
   result := parent;
 
+  if (fileInfo.Line > StartLine) then
+    ParserError('Table headers must be on a single line');
+
   Consume(TToken.SquareBracketClosed);
+
+  if (token <> TToken.EOF) and (fileInfo.Line = StartLine) then
+    ParserError('Tables headers must finish with EOL');
 end;
 
 { Parse inline tables
@@ -372,12 +434,17 @@ begin
       ParsePair;
 
       if TryConsume(TToken.Comma) then
-        begin
-          // curly bracket found for pair
-          if TryConsume(TToken.CurlyBracketClosed) then
-            ParserError('Inline tables do not allow trailing commas.');
-          continue;
-        end;
+      begin
+        // curly bracket found for pair
+        if TryConsume(TToken.CurlyBracketClosed) then
+          ParserError('Inline tables do not allow trailing commas.');
+        continue;
+      end
+      else
+      begin
+        Consume(TToken.CurlyBracketClosed);
+        Break;
+      end;
     end;
     // disable EOL tokens and clear the next one if it's found
     readLineEndingsAsTokens := false;
@@ -486,6 +553,7 @@ function TTOMLScanner.ParseValue: TTOMLData;
 
 var
   negative: boolean;
+  str: string;
 begin
   Result := nil;
 
@@ -497,43 +565,61 @@ begin
     TToken.Integer:
       begin
         // the integer is a possible date so switch parsers
-        if c = '-' then
+        if (Length(pattern) = 4) and (c = '-') then
           begin
-            Advance(1);
             result := ParseDate(true);
             Consume;
           end
-        else if c = ':' then
+        else if (Length(pattern) = 2) and (c = ':') then
           begin
-            Advance(1);
             result := TTOMLDate.Create(ParseTime(true));
             Consume;
           end
         else
           begin
-            result := TTOMLNumber.Create(StrToInt64(TEncoding.UTF8.GetString(pattern)),
-              TTOMLNumberType.Integer);
+            if ((Length(pattern) > 1)  and (pattern[0] = Ord('0'))) or
+              ((Length(pattern) > 2)  and (pattern[0] in [Ord('+'), Ord('-')]) and
+              (pattern[1] = Ord('0')))
+            then
+              ParserError('Numbers with leading zeros not allowed');
+
+            str := TEncoding.UTF8.GetString(pattern);
+            result := TTOMLNumber.Create(StrToInt64(str), TTOMLNumberType.Integer);
             Consume;
           end;
       end;
     TToken.HexadecimalNumber:
       begin
-        result := TTOMLNumber.Create(StrToInt64(TEncoding.UTF8.GetString(pattern)), TTOMLNumberType.Hexadecimal);
+        if pattern[0] in [Ord('+'), Ord('-')] then
+          ParserError('Hex numbers should not have a sign');
+        str := TEncoding.UTF8.GetString(pattern);
+        result := TTOMLNumber.Create(StrToInt64(str), TTOMLNumberType.Hexadecimal);
         Consume;
       end;
     TToken.OctalNumber:
       begin
+        if pattern[0] in [Ord('+'), Ord('-')] then
+          ParserError('Octal numbers should not have a sign');
         result := TTOMLNumber.Create(OctalToInt(TEncoding.UTF8.GetString(pattern)), TTOMLNumberType.Octal);
         Consume;
       end;
     TToken.BinaryNumber:
       begin
+        if pattern[0] in [Ord('+'), Ord('-')] then
+          ParserError('Binary numbers should not have a sign');
         result := TTOMLNumber.Create(BinToInt(TEncoding.UTF8.GetString(pattern)), TTOMLNumberType.Binary);
         Consume;
       end;
     TToken.RealNumber:
       begin
-        result := TTOMLNumber.Create(StrToFloat(TEncoding.UTF8.GetString(pattern)), TTOMLNumberType.Float);
+        if ((Length(pattern) > 1)  and (pattern[0] = Ord('0')) and (pattern[1] in [Ord('0')..Ord('9')])) or
+          ((Length(pattern) > 2)  and (pattern[0] in [Ord('+'), Ord('-')]) and
+          (pattern[1] = Ord('0')) and (pattern[2] in [Ord('0')..Ord('9')]))
+        then
+          ParserError('Numbers with leading zeros not allowed');
+
+        str := TEncoding.UTF8.GetString(pattern);
+        result := TTOMLNumber.Create(StrToFloat(str), TTOMLNumberType.Float);
         Consume;
       end;
     TToken.SquareBracketOpen:
@@ -575,7 +661,7 @@ begin
       if (token = TToken.DoubleQuote) or (token = TToken.SingleQuote) then
         begin
           Consume;
-          result := result + [ParseString];
+          result := result + [ParseString(False)];
         end
       else if token = TToken.Integer then
         begin
@@ -619,9 +705,15 @@ var
   table, value: TTOMLData;
   child, parent: TTOMLTable;
   i: integer;
+  StartLine: Integer;
 begin
+  StartLine := fileInfo.line;
+
   keys := ParseKey;
   Consume(TToken.Equals);
+
+  if fileInfo.line > StartLine then
+    ParserError('In key-value pairs, the key and value must be on the same line');
 
   //writeln('parse pair: ',keys.CommaText);
 
@@ -687,24 +779,29 @@ end;
 function TTOMLScanner.ReadDigits(digits: integer; decimals: boolean = false): string;
 begin
   pattern := [];
-  while (c in ['0'..'9']) and (Length(pattern) <= digits) do
+  while Length(pattern) < digits do
+    begin
+      if not (c in ['0'..'9']) then
+        ParserError('Expected '+ digits.ToString + ' digits but got "' +
+          Length(pattern).ToString + '".');
+      AdvancePattern;
+    end;
+
+  // decimal part at the end
+  if decimals and (c = '.') then
     begin
       AdvancePattern;
-      // decimal part at the end
-      if decimals and (c = '.') then
-        begin
-          AdvancePattern;
-          while c in ['0'..'9'] do
-            AdvancePattern;
-          break;
-        end;
+      if not (c in ['0'..'9']) then
+        ParserError('In floating numbers the dot needs to be surrounded by at least one digit on each side');
+      while c in ['0'..'9'] do
+        AdvancePattern;
     end;
-  if Length(pattern) = 0 then
-    ParserError('Expected '+IntToStr(digits)+' digits but got "' + Char(c) + '".');
+
   result := TEncoding.UTF8.GetString(pattern);
 end;
 
-function TTOMLScanner.ParseTime(continueFromNumber: boolean): TTOMLDate.TTime;
+function TTOMLScanner.ParseTime(continueFromNumber: boolean = false; IsOffset:
+    Boolean = False): TTOMLDate.TTime;
 begin
   // hours
   // the parsing is being continued from a number
@@ -712,23 +809,25 @@ begin
   if continueFromNumber then
     result.hours := StrToInt(TEncoding.UTF8.GetString(pattern))
   else
-    begin
-      result.hours := StrToInt(ReadDigits(2));
-      Consume(':');
-    end;
+    result.hours := StrToInt(ReadDigits(2));
+  Consume(':');
 
   // minutes
   result.minutes := StrToInt(ReadDigits(2));
 
-  // seconds
-  // TODO: are seconds optional?
-  if c = ':' then
+  // seconds only if it is not an offset
+  if not IsOffset then
     begin
       Consume(':');
       result.seconds := StrToFloat(ReadDigits(2, true));
     end
   else
     result.seconds := 0;
+
+  if (result.hours >= HoursPerDay) or (result.minutes >= MinsPerHour) or
+    (result.seconds >= SecsPerMin)
+  then
+    ParserError('Invalid time');
 end;
 
 function TTOMLScanner.ParseDate(continueFromNumber: boolean): TTOMLDate;
@@ -736,6 +835,7 @@ var
   date: TTOMLDate;
   HasTime: Boolean;
   PositiveOffset: Boolean;
+  LDate: TDateTime;
 begin
   date := TTOMLDate.Create;
   try
@@ -744,10 +844,8 @@ begin
     if continueFromNumber then
       date.year := StrToInt(TEncoding.UTF8.GetString(pattern))
     else
-      begin
-        date.year := StrToInt(ReadDigits(4));
-        Consume('-');
-      end;
+      date.year := StrToInt(ReadDigits(4));
+    Consume('-');
 
     // month
     date.month := StrToInt(ReadDigits(2));
@@ -755,6 +853,9 @@ begin
     // day
     Consume('-');
     date.day := StrToInt(ReadDigits(2));
+
+    if not TryEncodeDate(date.year, date.month, date.day, LDate) then
+      ParserError('Invalid date');
 
     // the date is a solo year
     if IsLineEnding or IsEOF then
@@ -789,7 +890,7 @@ begin
         begin
           PositiveOffset := c = '+';
           Advance(1);;
-          date.offset := ParseTime;
+          date.offset := ParseTime(False, True);
           if PositiveOffset then
             date.offset.hours := -date.offset.hours;
         end;
@@ -843,20 +944,25 @@ begin
     begin
       if c = '_' then
         begin
-          if underscore then
-            ParserError('Each underscore must be surrounded by at least one digit on each side');
+          if ((length(pattern) = 0) or not (pattern[length(pattern) - 1] in [Ord('0')..Ord('9')])) or
+            not (Peek(1) in ['0'..'9']) or underscore
+          then
+            ParserError('In floating numbers the dot needs to be surrounded by at least one digit on each side');
           ReadChar;
           underscore := true;
           continue;
         end;
 
-      underscore := false;
+      if c in ['0'..'9'] then
+        underscore := false;
 
       // parse octal
       if (c = '0') and (Peek(1) = 'o') then
         begin
           token := TToken.OctalNumber;
           Advance(2);
+          if c = '_' then
+            ParserError('Each underscore must be surrounded by at least one digit on each side');
           continue;
         end;
 
@@ -865,6 +971,8 @@ begin
         begin
           token := TToken.BinaryNumber;
           Advance(2);
+          if c = '_' then
+            ParserError('Each underscore must be surrounded by at least one digit on each side');
           continue;
         end;
 
@@ -879,7 +987,10 @@ begin
                 begin
                   if c = '_' then
                     begin
-                      if underscore then
+                      if ((length(pattern) = 0) or
+                        not (AnsiChar(pattern[length(pattern) - 1]) in ['0'..'9', 'A'..'F','a'..'f'])) or
+                        not (Peek(1) in ['0'..'9', 'A'..'F','a'..'f']) or underscore
+                      then
                         ParserError('Each underscore must be surrounded by at least one digit on each side');
                       ReadChar;
                       underscore := true;
@@ -901,6 +1012,8 @@ begin
 
       if Char(c).ToLower = 'e' then
         begin
+          if underscore then
+            ParserError('Each underscore must be surrounded by at least one digit on each side');
           token := TToken.RealNumber;
           AdvancePattern;
           if (c = '-') or (c = '+') then
@@ -911,7 +1024,9 @@ begin
               found := true;
               if c = '_' then
                 begin
-                  if underscore then
+                  if (length(pattern) = 0) or
+                    not (pattern[length(pattern) - 1] in [Ord('0')..Ord('9')]) or underscore
+                  then
                     ParserError('Each underscore must be surrounded by at least one digit on each side');
                   ReadChar;
                   underscore := true;
@@ -925,15 +1040,21 @@ begin
           break;
         end
       else if c = '.' then
+      begin
+        if ((length(pattern) = 0) or not (pattern[length(pattern) - 1] in [Ord('0')..Ord('9')]))  or
+          not (Peek(1) in ['0'..'9'])
+        then
+          ParserError('In floating numbers the dot needs to be surrounded by at least one digit on each side');
         token := TToken.RealNumber;
+      end;
 
       AdvancePattern;
     end;
 
+  Finished:
+
   if underscore then
     ParserError('Each underscore must be surrounded by at least one digit on each side');
-
-  Finished:
 
   // incomplete prefixed number
   if Length(pattern) = 0 then
@@ -968,7 +1089,11 @@ begin
       token := TToken.SingleQuote;
     '#':
       begin
-        ReadUntilEOL;
+        repeat
+          ReadChar;
+          if c in [#$1..#$8,#$B, #$C, #$E..#$1F, #$7F] then
+            ParserError(Format('Invalid character "#%d in comment', [Ord(c)]));
+        until IsLineEnding or IsEOF;
         cont := true;
       end;
     else
@@ -977,6 +1102,8 @@ begin
 end;
 
 procedure TTOMLScanner.ParseToken;
+var
+  OldLine: Integer;
 begin
   case token of
     TToken.SquareBracketOpen:
@@ -988,7 +1115,12 @@ begin
     TToken.DoubleQuote,
     TToken.SingleQuote,
     TToken.Dash:
-      ParsePair;
+      begin
+        OldLine := fileInfo.line;
+        ParsePair;
+        if (token <> TToken.EOF) and (fileInfo.Line = OldLine) then
+          ParserError('Key-value pairs must finish with EOL');
+      end
     else
       if token <> TToken.EOF then
         ParserError('Unexpected "'+token.ToString+'" found.');
