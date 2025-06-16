@@ -115,7 +115,6 @@ type
     public
       constructor Create(Bytes: TBytes); virtual;
       procedure Parse; virtual;
-      destructor Destroy; override;
   end;
 
 type
@@ -124,6 +123,14 @@ type
   end;
 
 implementation
+
+resourcestring
+  rsParseError = 'Error at %d:%d: %s';
+  rsUnexpectedCharacter = 'Unexpected character "%s"';
+  rsInvalidToken = 'Invalid token';
+  rsExpectedGot = 'Expected "%s", got "%s"';
+  rsUnknownCharacter = 'Unknown character "%s"';
+  rsInvalidLineBreak = 'Invalid line break: CR without LF';
 
 const
   TCharSetLineEnding = [#10, #13];
@@ -170,7 +177,7 @@ begin
     TScanner.TToken.EOL:
       result := 'End of Line';
     else
-      raise exception.create('invalid token');
+      raise EScanner.Create(rsInvalidToken);
   end;
 end;
 
@@ -184,7 +191,7 @@ begin
   if token = t then
     ReadToken
   else
-    ParserError('Got "'+ token.ToString + '", expected "' + t.ToString+'"');
+    ParserError(Format(rsExpectedGot, [t.ToString, token.ToString]));
 end;
 
 procedure TScanner.Consume(inChar: AnsiChar);
@@ -192,13 +199,13 @@ begin
   if c = inChar then
     AdvancePattern
   else
-    ParserError('Got "'+ Char(c) + '", expected "' + Char(inChar) + '"');
+    ParserError(Format(rsExpectedGot,  [Char(inChar), Char(c)]));
 end;
 
 procedure TScanner.Consume(charset: TSysCharSet);
 begin
   if not (c in charset) then
-    ParserError('Unexpected character "'+ Char(c) + '"')
+    ParserError(Format(rsUnexpectedCharacter, [c]))
   else
     while c in charset do
       AdvancePattern;
@@ -241,7 +248,7 @@ begin
       begin
         ReadChar;
         if c <>  #10 then
-          ParserError('Invalid line end: CR without LF');
+          ParserError(rsInvalidLineBreak);
       end;
       consumedLineEnding := true;
       ReadChar;
@@ -397,12 +404,13 @@ begin
   messageString := StringReplace(messageString, #10, 'EOL', []);
   messageString := StringReplace(messageString, #12, 'EOL', []);
   messageString := StringReplace(messageString, #13, 'EOL', []);
-  raise GetException.Create('Error at '+IntToStr(fileInfo.line)+':'+IntToStr(fileInfo.column)+': '+messageString);
+  raise GetException.Create(Format(rsParseError,
+    [fileInfo.line, fileInfo.column, messageString]));
 end;
 
 procedure TScanner.UnknownCharacter(out cont: boolean);
 begin
-  ParserError('Unknown character "'+ c + '"');
+  ParserError(Format(rsUnknownCharacter, [c]));
 end;
 
 function TScanner.WhiteSpaceTillEOL: boolean;
@@ -536,11 +544,6 @@ begin
   fileInfo.line := 1;
   fileInfo.column := 1;
   c := AnsiChar(contents[currentIndex]);
-end;
-
-destructor TScanner.Destroy;
-begin
-  inherited;
 end;
 
 end.

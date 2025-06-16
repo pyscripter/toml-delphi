@@ -1,8 +1,9 @@
 {
-    Copyright (c) 2020 by Ryan Joseph
-
     TOML Parser
     This unit implements the main parser class
+
+    Copyright (c) 2020 by Ryan Joseph
+    Extensively re-written by PyScripter
 
     ********************************************************************
 
@@ -37,45 +38,36 @@ uses
 
 type
 
-  { TTOMLDocument }
-  TTOMLDocument = TJSONObject;
-  TTOMLTable = TJSONObject;
-  TTOMLArray = TJSONArray;
-  TTOMLDATA = TJSONValue;
-  TTOMLNumber = TJSONNumber;
-  TTOMLBoolean = TJSONBool;
-  TTOMLContainerList = TStack<TJsonObject>;
-
   TTOMLScanner = class(TScanner)
     private
-      document: TTOMLDocument;
-      FDefinedTables: TList<TTOMLTable>;
-      FCreatedInline: TList<TTOMLTable>;
+      document: TJSONObject;
+      FDefinedTables: TList<TJSONObject>;
+      FCreatedInline: TList<TJSONObject>;
       FImmutableList: TList<TJSONValue>;
-      TableStack: TTOMLContainerList;
+      TableStack: TStack<TJsonObject>;
     private
       // support functions
-      function GetOrCreateTable(AParent: TTOMLTable; Keys: TArray<string>; IsPairKey:
-          Boolean = False): TTOMLTable;
-      function FindValue(Table: TTOMLTable; Keys: TArray<string>): TJSONValue;
-      procedure AddPair(Table: TTOMLTable; Key: string; Value: TJsonValue);
+      function GetOrCreateTable(AParent: TJSONObject; Keys: TArray<string>; IsPairKey:
+          Boolean = False): TJSONObject;
+      function FindValue(Table: TJSONObject; Keys: TArray<string>): TJSONValue;
+      procedure AddPair(Table: TJSONObject; Key: string; Value: TJsonValue);
 
-      function ParseArray: TTOMLArray;
+      function ParseArray: TJSONArray;
       procedure ParseTable;
-      function ParseInlineTable: TTOMLTable;
+      function ParseInlineTable: TJSONObject;
       procedure ParseArrayOfTables;
       function ParseString(AllowMultiline: Boolean = True): string;
-      function ParseDate(continueFromNumber: boolean): TBytes;
-      function ParseTime(continueFromNumber: boolean = false; IsOffset: Boolean =
-          False): TBytes;
+      function ParseDate(continueFromNumber: Boolean): TBytes;
+      function ParseTime(continueFromNumber: Boolean = false;
+        IsOffset: Boolean = False): TBytes;
       procedure ParsePair;
-      function ParseValue: TTOMLData;
+      function ParseValue: TJSONValue;
       function ParseKey: TArray<string>;
 
-      function ReadDigits(digits: integer; decimals: boolean = false): string;
+      function ReadDigits(digits: integer; decimals: Boolean = False): string;
     protected
       procedure ParseToken; override;
-      procedure UnknownCharacter(out cont: boolean); override;
+      procedure UnknownCharacter(out cont: Boolean); override;
       function ReadWord: TScanner.TIdentifier; override;
       function ReadNumber: string; override;
       function GetException: EScannerClass; override;
@@ -85,7 +77,7 @@ type
       procedure Parse; override;
   end;
 
-function GetTOML(contents: TBytes): TTOMLDocument;
+function GetTOML(Contents: TBytes): TJSONObject;
 
 implementation
 
@@ -93,23 +85,70 @@ uses
   System.Character,
   System.StrUtils;
 
+resourcestring
+  rsCannotRedefineTable = 'Cannot redefine a table';
+  rsCannotRedefineKey = 'Cannot redefine an existing key';
+  rsInvalidUtf8 = 'Invalid utf8 input';
+  rsCannotExtendImmutableValues = 'Cannot extend immutable values';
+  rsInvalidCharacter = 'Invalid character "#%d in string';
+  rsInvalidLineBreak = 'Invalid line break: CR without LF';
+  rsInvalidUnicodeCharacter = 'Unicode characters need to be unicode scalars';
+  rsInvalidEscapeChar = 'Invalid string escape char: "%s"';
+  rsInvalidMultilineString = 'Invalid multiline string';
+  rsSingleLineNoBreaks = 'Single line strings must not contain line breaks (' +
+  '#%d)';
+  rsInputTerminationError = 'Input termination error';
+  rsCannotExtendStaticArrays = 'Cannot extend static table arrays';
+  rsTableArrayHeaders = 'Table array headers must end with "]]"';
+  rsTableArrayHeadersSingleLine = 'Table array headers must be on a single l' +
+  'ine';
+  rsTableArrayHeadersEOL = 'Table array headers must finish with EOL';
+  rsInlineTablesNoTrailingComma = 'Inline tables do not allow trailing comma' +
+  's.';
+  rsNegativeBoolInvalid = 'Negative booleans are invalid';
+  rsInvalidBinaryDigit = 'Invalid binary digit: "%s"';
+  rsInvalidOctalDigit = 'Invalid octal digit "%s" in string "%s"';
+  rsNumbersWithLeadingZeros = 'Numbers with leading zeros not allowed';
+  rsSignedHexNumbers = 'Hex numbers should not have a sign';
+  rsSignedOctalNumbers = 'Octal numbers should not have a sign';
+  rsSignedBinaryNumbers = 'Binary numbers should not have a sign';
+  rsInvalidValue = 'Invalid value "%s"';
+  rsUnexpectedToken = 'Unexpected token "%s"';
+  rsKeyValueSameLine = 'Key and Value must be on the same line in key-value ' +
+  'pairs';
+  rsDotSurroundedByDigits = 'In numbers the dot needs to be surrounded by at' +
+  ' least one digit on each side';
+  rsInvalidTime = 'Invalid time';
+  rsInvalidDate = 'Invalid date';
+  rsWrongNumberOfDigits = 'Expected %d digits but got %d';
+  rsInvalidPlusMinus = 'Invalid +/- sequence';
+  rsUnderscoreSurroundedByDigits = 'Each underscore must be surrounded by at' +
+  ' least one digit on each side';
+  rsInvalidHexNumber = 'Invalid hexadecimal number';
+  rsIncompleteOctalNumber = 'Incomplete octal number';
+  rsIncompleteBinaryNumber = 'Incomplete binary number';
+  rsIncompleteHexNumber = 'Incomplete hexadecimal number';
+  rsKeyValuePairsEOL = 'Key-value pairs must finish with EOL';
+  rsExponentFolllowedByInteger = 'Exponent must be followed by an integer';
+  rsInvalidCharacterInComment = 'Invalid character "#%d in comment';
+
 type
   ETOML = class(EScanner);
 
-function GetTOML(contents: TBytes): TTOMLDocument;
+function GetTOML(Contents: TBytes): TJSONObject;
 var
-  parser: TTOMLScanner;
+  Parser: TTOMLScanner;
 begin
-  parser := TTOMLScanner.Create(contents);
+  Parser := TTOMLScanner.Create(Contents);
 
   try
     // check whether the input is valid utf8
-    if not TEncoding.UTF8.IsBufferValid(contents) then
-      parser.ParserError('The input is not valid utf8');
-    parser.Parse;
-    result := parser.document;
+    if not TEncoding.UTF8.IsBufferValid(Contents) then
+      Parser.ParserError(rsInvalidUtf8);
+    Parser.Parse;
+    Result := Parser.document;
   finally
-    parser.Free;
+    Parser.Free;
   end;
 end;
 
@@ -120,8 +159,8 @@ begin
   result := ETOML;
 end;
 
-function TTOMLScanner.GetOrCreateTable(AParent: TTOMLTable; Keys:
-    TArray<string>; IsPairKey: Boolean = False): TTOMLTable;
+function TTOMLScanner.GetOrCreateTable(AParent: TJSONObject; Keys:
+    TArray<string>; IsPairKey: Boolean = False): TJSONObject;
 var
   Table: TJSONValue;
 begin
@@ -130,30 +169,30 @@ begin
     Table := AParent.Values[Keys[0]];
 
     if FImmutableList.Contains(Table) then
-      ParserError('You cannot extend immutable valuees');
+      ParserError(rsCannotExtendImmutableValues);
 
     if Table is TJSONArray then
     begin
       if TJSonArray(Table)[TJSonArray(Table).Count - 1] is TJSONObject then
         Table := TJSonArray(Table)[TJSonArray(Table).Count - 1]
       else
-        ParserError('You cannot redifine an existing key');
+        ParserError(rsCannotRedefineKey);
     end
     else if Assigned(Table) then
     begin
-      if not (Table is TTOMLTable) or
-        (IsPairKey and FDefinedTables.Contains(TTOMLTable(Table)))
+      if not (Table is TJSONObject) or
+        (IsPairKey and FDefinedTables.Contains(TJSONObject(Table)))
       then
-        ParserError('You cannot redifine an existing key');
+        ParserError(rsCannotRedefineKey);
     end
     else if not Assigned(Table) then
     begin
-      Table := TTOMLTable.Create;
+      Table := TJSONObject.Create;
       if IsPairKey then
-        FCreatedInline.Add(TTOMLTable(Table));
+        FCreatedInline.Add(TJSONObject(Table));
       AddPair(AParent, keys[0], Table);
     end;
-    AParent := TTOMLTable(Table);
+    AParent := TJSONObject(Table);
     Delete(Keys, 0, 1);
   end;
   Result := AParent;
@@ -165,7 +204,7 @@ var
   scalar: Cardinal;
   multiline,
   literal,
-  firstPass: boolean;
+  firstPass: Boolean;
   DoNotRead: Boolean;
 begin
   pattern := [];
@@ -183,14 +222,14 @@ begin
 
       // Control character validation
       if (c in [#$0..#$8,#$A..#$1F, #$7F]) and not (multiline and IsLineEnding) then
-        ParserError(Format('Invalid character "#%d in string', [Ord(c)]));
+        ParserError(Format(rsInvalidCharacter, [Ord(c)]));
 
       // EOL validation
       if c = #13 then
       begin
         AdvancePattern;
         if c <>  #10 then
-          ParserError('Invalid line end: CR without LF');
+          ParserError(rsInvalidLineBreak);
         AdvancePattern;
         Continue;
       end;
@@ -201,22 +240,22 @@ begin
       if firstPass and (c = quote) then
         begin
           ReadChar;
-          firstPass := false;
+          firstPass := False;
           if c = quote then
             begin
               if not AllowMultiline then
-                ParserError('Invalid use of multiline strings');
+                ParserError(rsInvalidMultilineString);
               multiline := true;
               // trim first new line
               if Peek(sLineBreak, 1) then
                 Advance(Length(sLineBreak));
-              continue;
+              Continue;
             end
           else // the string is empty so return now
             begin
               result := TEncoding.UTF8.GetString(pattern);
               ReadToken;
-              exit;
+              Exit;
             end;
         end;
 
@@ -276,7 +315,7 @@ begin
                   ReadChar;
                   scalar := StrToInt(string('$' + PeekString(4)));
                   if Char(scalar).IsSurrogate then
-                    ParserError('Unicode characters need to be unicode scalars');
+                    ParserError(rsInvalidUnicodeCharacter);
                   pattern := pattern + TEncoding.Utf8.GetBytes(Char(scalar));
                   Advance(4 - 1);
                 end;
@@ -288,12 +327,12 @@ begin
                   Advance(8 - 1);
                 end;
             else
-              ParserError('Bad string escape char: "' + c + '"');
+              ParserError(Format(rsInvalidEscapeChar, [c]));
             end
         end
       // line breaks are not allowed
       else if not multiline and IsLineEnding then
-        ParserError('Single line strings must not contain line endings (#'+IntToStr(ord(c))+')')
+        ParserError(Format(rsSingleLineNoBreaks, [Ord(c).ToString]))
       // join any character that isn't a quote
       else if c <> quote then
         pattern := pattern + [Ord(c)]
@@ -308,7 +347,7 @@ begin
                 pattern := pattern + [Ord(c), Ord(c)];
                 result := TEncoding.UTF8.GetString(pattern);
                 ReadTo(5);
-                exit;
+                Exit;
               end
               else if Peek(quote+quote+quote+quote) then
               begin
@@ -316,14 +355,14 @@ begin
                 pattern := pattern + [Ord(c)];
                 result := TEncoding.UTF8.GetString(pattern);
                 ReadTo(4);
-                exit;
+                Exit;
               end
               // end of string
               else if Peek(quote+quote+quote) then
               begin
                 result := TEncoding.UTF8.GetString(pattern);
                 ReadTo(3);
-                exit;
+                Exit;
               end
               else
                 pattern := pattern + [Ord(c)];
@@ -332,19 +371,19 @@ begin
             begin
               result := TEncoding.UTF8.GetString(pattern);
               ReadTo(1);
-              exit;
+              Exit;
             end;
         end;
     end;
-  Assert(false, 'string termination error');
+  Assert(False, rsInputTerminationError);
 end;
 
 procedure TTOMLScanner.ParseArrayOfTables;
 var
-  ParentTable: TTOMLTable;
-  NewTable: TTOMLTable;
+  ParentTable: TJSONObject;
+  NewTable: TJSONObject;
   Keys: TArray<string>;
-  Arr: TTOMLArray;
+  Arr: TJSONArray;
   Value: TJSONValue;
   StartLine: Integer;
 begin
@@ -361,46 +400,46 @@ begin
   TableStack.Pop;
 
   Value := FindValue(TableStack.Peek, Keys);
-  if (Value <> nil) and not (Value is TTOMLArray) then
-    ParserError('You cannot redifine an existing key');
+  if (Value <> nil) and not (Value is TJSONArray) then
+    ParserError(rsCannotRedefineKey);
   if FImmutableList.Contains(Value) then
-    ParserError('You cannot extend static table arrays');
+    ParserError(rsCannotExtendStaticArrays);
 
-  if Value is TTOMLArray then
-    Arr := TTOMLArray(Value)
+  if Value is TJSONArray then
+    Arr := TJSONArray(Value)
   else
   begin
     // Create the parent table if needed and then create the array.
     ParentTable := GetOrCreateTable(TableStack.Peek,
       Copy(Keys, 0, Length(Keys) - 1));
-    Arr :=  TTOMLArray.Create;
+    Arr :=  TJSONArray.Create;
     AddPair(ParentTable, Keys[Length(Keys) - 1], Arr);
   end;
-  NewTable := TTOMLTable.Create;
+  NewTable := TJSONObject.Create;
   Arr.Add(NewTable);
 
   // push the new table
   TableStack.Push(NewTable);
 
   if c <>  ']' then
-    ParserError('Table array headers must end with "]]"');
+    ParserError(rsTableArrayHeaders);
 
   Consume(TToken.SquareBracketClosed);
 
   if (fileInfo.Line > StartLine) then
-    ParserError('Table array headers must be on a single line');
+    ParserError(rsTableArrayHeadersSingleLine);
 
   Consume(TToken.SquareBracketClosed);
 
   if (token <> TToken.EOF) and (fileInfo.Line = StartLine) then
-    ParserError('Table array headers must finish with EOL');
+    ParserError(rsTableArrayHeadersEOL);
 end;
 
 procedure TTOMLScanner.ParseTable;
 var
   Keys: TArray<string>;
-  ParentTable: TTOMLTable;
-  NewTable: TTOMLTable;
+  ParentTable: TJSONObject;
+  NewTable: TJSONObject;
   Value: TJSONValue;
   StartLine: Integer;
 begin
@@ -424,16 +463,16 @@ begin
   Value := FindValue(TableStack.Peek, Keys);
   if Value <> nil then
   begin
-    if Value is TTOMLTable then
+    if Value is TJSONObject then
     begin
       // defining a super table
-      NewTable := TTOMLTable(Value);
+      NewTable := TJSONObject(Value);
       if FDefinedTables.Contains(NewTable) then
-        ParserError('You cannot redefine a table');
+        ParserError(rsCannotRedefineTable);
     end
     else
     begin
-      ParserError('You cannot redifine an existing key');
+      ParserError(rsCannotRedefineKey);
       Exit; // To avoid warning about NewTable not initialized
     end;
   end
@@ -443,8 +482,8 @@ begin
     ParentTable := GetOrCreateTable(TableStack.Peek,
       Copy(Keys, 0, Length(Keys) - 1));
     if Assigned(ParentTable.Values[Keys[Length(Keys) - 1]]) then
-      ParserError('You cannot redifine an existing key');
-    NewTable :=  TTOMLTable.Create;
+      ParserError(rsCannotRedefineKey);
+    NewTable :=  TJSONObject.Create;
     AddPair(ParentTable, Keys[Length(Keys) - 1], NewTable);
   end;
 
@@ -452,15 +491,15 @@ begin
   TableStack.Push(NewTable);
 
   if (fileInfo.Line > StartLine) then
-    ParserError('Table headers must be on a single line');
+    ParserError(rsTableArrayHeadersSingleLine);
 
   Consume(TToken.SquareBracketClosed);
 
   if (token <> TToken.EOF) and (fileInfo.Line = StartLine) then
-    ParserError('Tables headers must finish with EOL');
+    ParserError(rsTableArrayHeadersEOL);
 end;
 
-function TTOMLScanner.ParseInlineTable: TTOMLTable;
+function TTOMLScanner.ParseInlineTable: TJSONObject;
 begin
   // inline tables don't allow newlines so we can override the newline behavior
   // of the scanner by enabling newlines as tokens
@@ -469,7 +508,7 @@ begin
   Consume(TToken.CurlyBracketOpen);
 
   // push new table to stack
-  Result := TTOMLTable.Create;
+  Result := TJSONObject.Create;
 
   TableStack.Push(Result);
   try
@@ -481,7 +520,7 @@ begin
       begin
         // curly bracket found for pair
         if TryConsume(TToken.CurlyBracketClosed) then
-          ParserError('Inline tables do not allow trailing commas.');
+          ParserError(rsInlineTablesNoTrailingComma);
         Continue;
       end
       else
@@ -505,16 +544,16 @@ begin
   TableStack.Pop;
 end;
 
-function TTOMLScanner.ParseArray: TTOMLArray;
+function TTOMLScanner.ParseArray: TJSONArray;
 var
-  Value: TTOMLData;
+  Value: TJSONValue;
   oldreadLineEndingsAsTokens: Boolean;
 begin
   oldreadLineEndingsAsTokens := readLineEndingsAsTokens;
   readLineEndingsAsTokens := False;
 
   Consume(TToken.SquareBracketOpen);
-  Result := TTOMLArray.Create;
+  Result := TJSONArray.Create;
 
   try
     while not TryConsume(TToken.SquareBracketClosed) do
@@ -536,9 +575,9 @@ begin
   FImmutableList.Add(Result);
 end;
 
-function TTOMLScanner.ParseValue: TTOMLData;
+function TTOMLScanner.ParseValue: TJSONValue;
 
-  function ParseNamedValue(Negative: Boolean = False): TTOMLData;
+  function ParseNamedValue(Negative: Boolean = False): TJSONValue;
   var
     valueString: string;
   begin
@@ -547,8 +586,8 @@ function TTOMLScanner.ParseValue: TTOMLData;
     if (valueString = 'false') or (valueString = 'true') then
       begin
         if Negative then
-          ParserError('Negative booleans are invalid');
-        Result := TTOMLBoolean.Create(StrToBool(valueString));
+          ParserError(rsNegativeBoolInvalid);
+        Result := TJSONBool.Create(StrToBool(valueString));
         Consume;
       end
     else if valueString = 'inf' then
@@ -578,7 +617,7 @@ function TTOMLScanner.ParseValue: TTOMLData;
       else if S[i] = '0' then
         Result := Result shl 1
       else
-        raise EConvertError.Create('Invalid binary digit: ' + S[i]);
+        raise EConvertError.Create(Format(rsInvalidBinaryDigit, [S[i]]));
     end;
   end;
 
@@ -596,13 +635,13 @@ function TTOMLScanner.ParseValue: TTOMLData;
             Result := Result * 8 + Ord(S[i]) - Ord('0');
           end;
         else
-          raise EConvertError.CreateFmt('Invalid octal digit "%s" in string "%s"', [S[i], S]);
+          raise EConvertError.CreateFmt(rsInvalidOctalDigit, [S[i], S]);
       end;
     end;
   end;
 
 var
-  negative: boolean;
+  negative: Boolean;
   str: string;
 begin
   Result := nil;
@@ -631,10 +670,10 @@ begin
               ((Length(pattern) > 2)  and (pattern[0] in [Ord('+'), Ord('-')]) and
               (pattern[1] = Ord('0')))
             then
-              ParserError('Numbers with leading zeros not allowed');
+              ParserError(rsNumbersWithLeadingZeros);
 
             str := TEncoding.UTF8.GetString(pattern);
-            result := TTOMLNumber.Create(str);
+            result := TJSONNumber.Create(str);
             try
               Consume;
             except
@@ -646,23 +685,23 @@ begin
     TToken.HexadecimalNumber:
       begin
         if pattern[0] in [Ord('+'), Ord('-')] then
-          ParserError('Hex numbers should not have a sign');
+          ParserError(rsSignedHexNumbers);
         str := TEncoding.UTF8.GetString(pattern);
-        result := TTOMLNumber.Create(StrToInt64(str));
+        result := TJSONNumber.Create(StrToInt64(str));
         Consume;
       end;
     TToken.OctalNumber:
       begin
         if pattern[0] in [Ord('+'), Ord('-')] then
-          ParserError('Octal numbers should not have a sign');
-        result := TTOMLNumber.Create(OctalToInt(TEncoding.UTF8.GetString(pattern)));
+          ParserError(rsSignedOctalNumbers);
+        result := TJSONNumber.Create(OctalToInt(TEncoding.UTF8.GetString(pattern)));
         Consume;
       end;
     TToken.BinaryNumber:
       begin
         if pattern[0] in [Ord('+'), Ord('-')] then
-          ParserError('Binary numbers should not have a sign');
-        result := TTOMLNumber.Create(BinToInt(TEncoding.UTF8.GetString(pattern)));
+          ParserError(rsSignedBinaryNumbers);
+        result := TJSONNumber.Create(BinToInt(TEncoding.UTF8.GetString(pattern)));
         Consume;
       end;
     TToken.RealNumber:
@@ -671,10 +710,10 @@ begin
           ((Length(pattern) > 2)  and (pattern[0] in [Ord('+'), Ord('-')]) and
           (pattern[1] = Ord('0')) and (pattern[2] in [Ord('0')..Ord('9')]))
         then
-          ParserError('Numbers with leading zeros not allowed');
+          ParserError(rsNumbersWithLeadingZeros);
 
         str := TEncoding.UTF8.GetString(pattern);
-        result := TTOMLNumber.Create(str);
+        result := TJSONNumber.Create(str);
         Consume;
       end;
     TToken.SquareBracketOpen:
@@ -692,12 +731,12 @@ begin
       begin
         result := ParseNamedValue;
         if result = nil then
-          ParserError('Invalid value "' + TEncoding.UTF8.GetString(pattern) +'"');
+          ParserError(Format(rsInvalidValue, [TEncoding.UTF8.GetString(pattern)]));
       end;
     else
-      ParserError('Unexpected token "'+token.ToString+'"')
+      ParserError(Format(rsUnexpectedToken, [token.ToString]))
   end;
-  Assert(result <> nil, 'Invalid TOML value from "'+token.ToString+'"');
+  Assert(result <> nil, Format(rsUnexpectedToken, [token.ToString]));
 end;
 
 function TTOMLScanner.ParseKey: TArray<string>;
@@ -753,7 +792,7 @@ end;
 procedure TTOMLScanner.ParsePair;
 var
   Keys: TArray<string>;
-  ParentTable: TTOMLTable;
+  ParentTable: TJSONObject;
   Value: TJSONValue;
   StartLine: Integer;
 begin
@@ -763,25 +802,25 @@ begin
   Consume(TToken.Equals);
 
   if fileInfo.line > StartLine then
-    ParserError('In key-value pairs, the key and value must be on the same line');
+    ParserError(rsKeyValueSameLine);
 
   Value := FindValue(TableStack.Peek, Keys);
   if Value <> nil then
-    ParserError('You cannot redefine an existing key');
+    ParserError(rsCannotRedefineKey);
 
   // add dotted keys as tables
   ParentTable := GetOrCreateTable(TableStack.Peek,
     Copy(Keys, 0, Length(Keys) - 1), True);
 
   if FDefinedTables.Contains(ParentTable) then
-    ParserError('You cannot redefine a table');
+    ParserError(rsCannotRedefineTable);
 
   Value := ParseValue;
 
   AddPair(ParentTable, keys[Length(keys) - 1], Value);
 end;
 
-function TTOMLScanner.ReadDigits(digits: integer; decimals: boolean = false): string;
+function TTOMLScanner.ReadDigits(digits: integer; decimals: Boolean = False): string;
 var
   Len: Integer;
 begin
@@ -789,8 +828,7 @@ begin
   while Length(pattern) < Len + digits do
     begin
       if not (c in ['0'..'9']) then
-        ParserError('Expected '+ digits.ToString + ' digits but got "' +
-          Length(pattern).ToString + '".');
+        ParserError(Format(rsWrongNumberOfDigits, [digits, Length(pattern)]));
       AdvancePattern;
     end;
 
@@ -799,7 +837,7 @@ begin
     begin
       AdvancePattern;
       if not (c in ['0'..'9']) then
-        ParserError('In floating numbers the dot needs to be surrounded by at least one digit on each side');
+        ParserError(rsDotSurroundedByDigits);
       while c in ['0'..'9'] do
         AdvancePattern;
     end;
@@ -807,7 +845,7 @@ begin
   result := TEncoding.UTF8.GetString(Copy(pattern, Len));
 end;
 
-function TTOMLScanner.ParseTime(continueFromNumber: boolean = false; IsOffset:
+function TTOMLScanner.ParseTime(continueFromNumber: Boolean = false; IsOffset:
     Boolean = False): TBytes;
 var
   Hours, Minutes: Integer;
@@ -837,12 +875,12 @@ begin
   if (Hours >= HoursPerDay) or (Minutes >= MinsPerHour) or
     (Seconds >= SecsPerMin)
   then
-    ParserError('Invalid time');
+    ParserError(rsInvalidTime);
 
   Result := Copy(pattern);
 end;
 
-function TTOMLScanner.ParseDate(continueFromNumber: boolean): TBytes;
+function TTOMLScanner.ParseDate(continueFromNumber: Boolean): TBytes;
 var
   Year, Month, Day: Integer;
   HasTime: Boolean;
@@ -864,7 +902,7 @@ begin
   Day := StrToInt(ReadDigits(2));
 
   if not TryEncodeDate(Year, Month, Day, LDate) then
-    ParserError('Invalid date');
+    ParserError(rsInvalidDate);
 
   // the date is a solo year
   if IsLineEnding or IsEOF then
@@ -915,9 +953,9 @@ function TTOMLScanner.ReadNumber: string;
   end;
 
 var
-  negative: boolean;
-  underscore: boolean;
-  found: boolean;
+  negative: Boolean;
+  underscore: Boolean;
+  found: Boolean;
 label
   Finished;
 begin
@@ -935,7 +973,7 @@ begin
     AdvancePattern;
 
  if (negative and (c = '-')) or (c = '+') then
-   ParserError('Invalid +/- sequence');
+   ParserError(rsInvalidPlusMinus);
 
 
   while c in ['0'..'9', '.', 'e', 'E', '_'] do
@@ -945,7 +983,7 @@ begin
           if ((length(pattern) = 0) or not (pattern[length(pattern) - 1] in [Ord('0')..Ord('9')])) or
             not (Peek(1) in ['0'..'9']) or underscore
           then
-            ParserError('In floating numbers the dot needs to be surrounded by at least one digit on each side');
+            ParserError(rsDotSurroundedByDigits);
           ReadChar;
           underscore := true;
           continue;
@@ -960,7 +998,7 @@ begin
           token := TToken.OctalNumber;
           Advance(2);
           if c = '_' then
-            ParserError('Each underscore must be surrounded by at least one digit on each side');
+            ParserError(rsUnderscoreSurroundedByDigits);
           continue;
         end;
 
@@ -970,7 +1008,7 @@ begin
           token := TToken.BinaryNumber;
           Advance(2);
           if c = '_' then
-            ParserError('Each underscore must be surrounded by at least one digit on each side');
+            ParserError(rsUnderscoreSurroundedByDigits);
           continue;
         end;
 
@@ -989,7 +1027,7 @@ begin
                         not (AnsiChar(pattern[length(pattern) - 1]) in ['0'..'9', 'A'..'F','a'..'f'])) or
                         not (Peek(1) in ['0'..'9', 'A'..'F','a'..'f']) or underscore
                       then
-                        ParserError('Each underscore must be surrounded by at least one digit on each side');
+                        ParserError(rsUnderscoreSurroundedByDigits);
                       ReadChar;
                       underscore := true;
                       continue;
@@ -1002,7 +1040,7 @@ begin
                   if IsWhiteSpace then
                     break
                   else
-                    ParserError('Invalid hexadecimal number');
+                    ParserError(rsInvalidHexNumber);
                 end;
             end;
           goto Finished;
@@ -1011,7 +1049,7 @@ begin
       if Char(c).ToLower = 'e' then
         begin
           if underscore then
-            ParserError('Each underscore must be surrounded by at least one digit on each side');
+            ParserError(rsUnderscoreSurroundedByDigits);
           token := TToken.RealNumber;
           AdvancePattern;
           if (c = '-') or (c = '+') then
@@ -1025,7 +1063,7 @@ begin
                   if (length(pattern) = 0) or
                     not (pattern[length(pattern) - 1] in [Ord('0')..Ord('9')]) or underscore
                   then
-                    ParserError('Each underscore must be surrounded by at least one digit on each side');
+                    ParserError(rsUnderscoreSurroundedByDigits);
                   ReadChar;
                   underscore := true;
                   continue;
@@ -1034,7 +1072,7 @@ begin
               underscore := false;
             end;
           if not found then
-            ParserError('Exponent must be followed by an integer');
+            ParserError(rsExponentFolllowedByInteger);
           break;
         end
       else if c = '.' then
@@ -1042,7 +1080,7 @@ begin
         if ((length(pattern) = 0) or not (pattern[length(pattern) - 1] in [Ord('0')..Ord('9')]))  or
           not (Peek(1) in ['0'..'9'])
         then
-          ParserError('In floating numbers the dot needs to be surrounded by at least one digit on each side');
+          ParserError(rsDotSurroundedByDigits);
         token := TToken.RealNumber;
       end;
 
@@ -1052,18 +1090,18 @@ begin
   Finished:
 
   if underscore then
-    ParserError('Each underscore must be surrounded by at least one digit on each side');
+    ParserError(rsUnderscoreSurroundedByDigits);
 
   // incomplete prefixed number
   if Length(pattern) = 0 then
     case token of
       TToken.OctalNumber:
-        ParserError('Incomplete octal number');
+        ParserError(rsIncompleteOctalNumber);
       TToken.BinaryNumber:
-        ParserError('Incomplete binary number');
+        ParserError(rsIncompleteBinaryNumber);
     end
     else if (Length(pattern) = 2) and (token = TToken.HexadecimalNumber) then
-      ParserError('Incomplete hexadecimal number');
+      ParserError(rsIncompleteHexNumber);
 
   result := TEncoding.UTF8.GetString(pattern);
 end;
@@ -1078,7 +1116,7 @@ begin
   result := TEncoding.UTF8.GetString(pattern);
 end;
 
-procedure TTOMLScanner.UnknownCharacter(out cont: boolean);
+procedure TTOMLScanner.UnknownCharacter(out cont: Boolean);
 begin
   case c of
     '"':
@@ -1090,7 +1128,7 @@ begin
         repeat
           ReadChar;
           if c in [#$1..#$8,#$B, #$C, #$E..#$1F, #$7F] then
-            ParserError(Format('Invalid character "#%d in comment', [Ord(c)]));
+            ParserError(Format(rsInvalidCharacterInComment, [Ord(c)]));
         until IsLineEnding or IsEOF;
         cont := true;
       end;
@@ -1117,17 +1155,17 @@ begin
         OldLine := fileInfo.line;
         ParsePair;
         if (token <> TToken.EOF) and (fileInfo.Line = OldLine) then
-          ParserError('Key-value pairs must finish with EOL');
+          ParserError(rsKeyValuePairsEOL);
       end
     else
       if token <> TToken.EOF then
-        ParserError('Unexpected "'+token.ToString+'" found.');
+        ParserError(Format(rsUnexpectedToken, [token.ToString]))
   end;
 end;
 
 procedure TTOMLScanner.Parse;
 begin
-  document := TTOMLDocument.Create();
+  document := TJSONObject.Create();
   try
     // Push twice so that it stays at the top once the document
     // key/value pair are processed and the first subtable is found
@@ -1140,7 +1178,7 @@ begin
   end;
 end;
 
-procedure TTOMLScanner.AddPair(Table: TTOMLTable; Key: string;
+procedure TTOMLScanner.AddPair(Table: TJSONObject; Key: string;
   Value: TJsonValue);
 // To allow empty keys
 begin
@@ -1150,9 +1188,9 @@ end;
 constructor TTOMLScanner.Create(Bytes: TBytes);
 begin
   inherited;
-  FDefinedTables := TList<TTOMLTable>.Create;
-  FCreatedInline := TList<TTOMLTable>.Create;
-  TableStack := TTOMLContainerList.Create;
+  FDefinedTables := TList<TJSONObject>.Create;
+  FCreatedInline := TList<TJSONObject>.Create;
+  TableStack := TStack<TJsonObject>.Create;
   FImmutableList := TList<TJSONValue>.Create;
 end;
 
@@ -1165,7 +1203,7 @@ begin
   inherited;
 end;
 
-function TTOMLScanner.FindValue(Table: TTOMLTable;
+function TTOMLScanner.FindValue(Table: TJSONObject;
   Keys: TArray<string>): TJSONValue;
 // Deals with empty keys
 var

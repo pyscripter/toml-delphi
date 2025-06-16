@@ -1,10 +1,4 @@
-﻿{
-    Copyright (c) 2020 by Ryan Joseph
-
-    TOML Parser Tests
-}
-
-{$APPTYPE CONSOLE}
+﻿{$APPTYPE CONSOLE}
 
 program Tests;
 uses
@@ -82,7 +76,7 @@ var
   CompatibleTests: TStringList;
 
 
-procedure RunTests(dir: string; expectedFail: boolean; showJSON: boolean = false);
+procedure RunTests(Dir: string; ExpectedFail: Boolean; ShowJSON: Boolean = False);
 
   procedure OutputResult(IsSuccess: Boolean; FileInfo: string;  ExcMsg: string  = '');
   var
@@ -100,37 +94,35 @@ procedure RunTests(dir: string; expectedFail: boolean; showJSON: boolean = false
 
 var
   Files: Tarray<string>;
-  name, parentdir, path: string;
-  contents: TBytes;
-  doc: TJSONObject;
+  Name, Parentdir, Path: string;
+  Doc: TJSONObject;
   Succeeded, Failed, Completed: Integer;
   FileInfo: string;
 begin
-  dir := ExpandFileName(dir);
-  Files := TDirectory.GetFiles(dir, '*.toml', TSearchOption.soAllDirectories);
+  Dir := ExpandFileName(Dir);
+  Files := TDirectory.GetFiles(Dir, '*.toml', TSearchOption.soAllDirectories);
 
   Succeeded := 0;
   Failed := 0;
   Completed := 0;
 
-  for path in files do
+  for Path in files do
     begin
       if not CompatibleTests.Contains(
-        Copy(path, Length(BasePath) + 2).Replace('\', '/', [rfReplaceAll]))
+        Copy(Path, Length(BasePath) + 2).Replace('\', '/', [rfReplaceAll]))
       then
         Continue;
 
-      name := TPath.GetFileName(path);
-      parentdir := TPath.GetFileName(TPath.GetDirectoryName(path));
-      FileInfo := TPath.Combine(parentdir, name);
+      Name := TPath.GetFileName(Path);
+      Parentdir := TPath.GetFileName(TPath.GetDirectoryName(Path));
+      FileInfo := TPath.Combine(Parentdir, Name);
 
       Inc(Completed);
-      doc := nil;
-      contents := TFile.ReadAllBytes(path);
+      Doc := nil;
 
       try
-        doc := GetTOML(contents);
-        if expectedFail then
+        Doc := GetTOML(Path);
+        if ExpectedFail then
         begin
           OutputResult(False, FileInfo);
           Inc(Failed)
@@ -143,7 +135,7 @@ begin
       except
         on E: Exception do
           begin
-            if not expectedFail then
+            if not ExpectedFail then
             begin
               Inc(Failed);
               OutputResult(False, FileInfo, E.Message);
@@ -155,21 +147,20 @@ begin
             end;
           end;
       end;
-      if showJSON and Assigned(doc) then
-        writeln(doc.Format);
-      doc.Free;
+      if ShowJSON and Assigned(Doc) then
+        writeln(Doc.Format);
+      Doc.Free;
     end;
 
   WriteLn;
   WriteLn(Format('Completed: %d, Succeeded: %d, Failed: %d',
     [Completed, Succeeded, Failed]));
   if Failed = 0 then
-    writeln(#$2713' All tests passed!');
+    Writeln(#$2713' All tests passed!');
   WriteLn;
 end;
 
 begin
-
   ReportMemoryLeaksOnShutdown := True;
   SetConsoleOutputCP(CP_UTF8);
 
@@ -180,11 +171,8 @@ begin
 
   RunTests(TPath.Combine(BasePath, 'valid'), False, False);
   RunTests(TPath.Combine(BasePath, 'invalid'), True, False);
-//  RunTests('./pass', false, false);
-//  RunTests('./fail', true);
 
   CompatibleTests.Free;
 
   ReadLn;
-
 end.
