@@ -8,9 +8,9 @@ uses
   System.IOUtils,
   System.JSON,
   System.Generics.Collections,
-  Scanner in '..\sources\Scanner.pas',
-  TOMLParser in '..\sources\TOMLParser.pas',
-  TOMLTypes in '..\sources\TOMLTypes.pas',
+  TOML.Scanner in '..\sources\TOML.Scanner.pas',
+  TOML.Parser in '..\sources\TOML.Parser.pas',
+  TOML.Types in '..\sources\TOML.Types.pas',
   TOML in '..\sources\TOML.pas';
 
 function JsonValuesEqual(Value1, Value2: TJsonValue): Boolean;
@@ -164,7 +164,7 @@ begin
   ReportMemoryLeaksOnShutdown := True;
   SetConsoleOutputCP(CP_UTF8);
 
-  BasePath := 'C:\Delphi\Components\toml-delphi\tests\toml-test\tests';
+  BasePath := 'toml-test\tests';
 
   CompatibleTests := TStringList.Create;
   CompatibleTests.LoadFromFile(TPath.Combine(BasePath, 'files-toml-1.0.0'));

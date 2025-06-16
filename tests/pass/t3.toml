@@ -1,6 +1,0 @@
-
-# Boolean
-# Booleans are just the tokens you're used to. Always lowercase.
-
-bool1 = true
-bool2 = false

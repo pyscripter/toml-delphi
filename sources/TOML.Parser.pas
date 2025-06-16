@@ -24,7 +24,7 @@
 }
 
 
-unit TOMLParser;
+unit TOML.Parser;
 
 interface
 

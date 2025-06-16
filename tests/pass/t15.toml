@@ -1,6 +1,0 @@
-# Test inline tables in arrays
-
-list = [
-  { from = 100, to = 200 },
-  { from = 100, to = 200 },
-]

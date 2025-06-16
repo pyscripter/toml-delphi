@@ -16,7 +16,7 @@
 
 }
 
-unit TOMLTypes;
+unit TOML.Types;
 
 interface
 
