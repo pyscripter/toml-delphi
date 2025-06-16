@@ -164,7 +164,7 @@ begin
   ReportMemoryLeaksOnShutdown := True;
   SetConsoleOutputCP(CP_UTF8);
 
-  BasePath := 'toml-test\tests';
+  BasePath := TPath.GetFullPath('.\toml-test\tests');
 
   CompatibleTests := TStringList.Create;
   CompatibleTests.LoadFromFile(TPath.Combine(BasePath, 'files-toml-1.0.0'));

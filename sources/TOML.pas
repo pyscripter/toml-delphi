@@ -26,7 +26,7 @@ uses
   System.SysUtils,
   System.Classes,
   System.JSON,
-  TOMLParser;
+  TOML.Parser;
 
 function GetTOML(Contents: TBytes): TJSONObject; overload;
 function GetTOML(Stream: TStream): TJSONObject; overload;
@@ -36,7 +36,7 @@ implementation
 
 function GetTOML(Contents: TBytes): TJSONObject;
 begin
-  Result := TOMLParser.GetTOML(Contents);
+  Result := TOML.Parser.GetTOML(Contents);
 end;
 
 function GetTOML(Stream: TStream): TJSONObject;

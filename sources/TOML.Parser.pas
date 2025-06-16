@@ -33,8 +33,8 @@ uses
   System.Classes,
   System.JSON,
   System.Generics.Collections,
-  Scanner,
-  TOMLTypes;
+  TOML.Scanner,
+  TOML.Types;
 
 type
 
