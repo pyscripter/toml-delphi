@@ -26,6 +26,7 @@ interface
 
 uses
   System.SysUtils,
+  System.JSON,
   TOMLParser,
   TOMLTypes;
 
@@ -38,7 +39,7 @@ type
   TTOMLTable = TOMLTypes.TTOMLTable;
   TTOMLDocument = TOMLTypes.TTOMLDocument;
 
-function GetTOML(contents: TBytes): TTOMLDocument;
+function GetTOML(contents: TBytes): TJSONObject;
 
 { TOMLData Operators }
 
@@ -84,7 +85,7 @@ implementation
 //  result := right.ToFloat;
 //end;
 
-function GetTOML(contents: TBytes): TTOMLDocument;
+function GetTOML(contents: TBytes): TJSONObject;
 begin
   result := TOMLParser.GetTOML(contents);
 end;

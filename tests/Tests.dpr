@@ -102,8 +102,7 @@ var
   Files: Tarray<string>;
   name, parentdir, path: string;
   contents: TBytes;
-  doc: TTOMLDocument;
-  json: TJSONValue;
+  doc: TJSONObject;
   Succeeded, Failed, Completed: Integer;
   FileInfo: string;
 begin
@@ -157,11 +156,7 @@ begin
           end;
       end;
       if showJSON and Assigned(doc) then
-        begin
-          json := doc.AsJSON;
-          writeln(json.Format);
-          json.Free;
-        end;
+        writeln(doc.Format);
       doc.Free;
     end;
 

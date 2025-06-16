@@ -30,6 +30,8 @@ interface
 uses
   System.SysUtils,
   System.Classes,
+  System.TypInfo,
+  System.Rtti,
   System.JSON,
   System.Generics.Collections;
 
@@ -42,6 +44,15 @@ type
                      Boolean,
                      Binary,
                      Hexadecimal);
+  TJSONFloat = class(TJSONString)
+  private
+    function GetAsDouble: double;
+  protected
+    function AsTValue(ATypeInfo: PTypeInfo; var AValue: TValue): Boolean; override;
+  public
+    procedure ToChars(Builder: TStringBuilder; Options: TJSONAncestor.TJSONOutputOptions); override;
+    property AsDouble: double read GetAsDouble;
+  end;
 
   { TTOMLData }
 
@@ -206,7 +217,11 @@ type
 
 implementation
 uses
-  Variants, Types, DateUtils;
+  System.Variants,
+  System.Types,
+  System.DateUtils,
+  System.Math,
+  System.JSONConsts;
 
 { TTOMLData }
 
@@ -616,5 +631,52 @@ begin
   inherited;
 end;
 
+{ TJSONFloat }
+
+function TJSONFloat.AsTValue(ATypeInfo: PTypeInfo; var AValue: TValue): Boolean;
+begin
+  if ATypeInfo.Kind = tkFloat then
+  begin
+    if (FValue = 'inf') or (FValue = '+inf') then
+    begin
+      AValue := Infinity;
+      Result := True;
+    end
+    else if FValue = '-inf' then
+    begin
+      AValue := NegInfinity;
+      Result := True;
+    end
+    else if (FValue = 'nan') or (FValue = '+nan') or (FValue = '-nan') then
+    begin
+      AValue := Nan;
+      Result := True;
+    end else
+      Result := inherited;
+  end
+  else
+    Result := inherited;
+end;
+
+function TJSONFloat.GetAsDouble: double;
+var
+  Value: TValue;
+begin
+  if not AsTValue(TypeInfo(double), Value) then
+    raise EJSONException.CreateResFmt(@SCannotConvertJSONValueToType,
+      [ClassName, 'double']);
+  Result := Value.AsType<double>;
+end;
+
+procedure TJSONFloat.ToChars(Builder: TStringBuilder;
+  Options: TJSONAncestor.TJSONOutputOptions);
+begin
+  if (FValue = 'inf') or (FValue = '+inf') or (FValue = '-inf') or
+     (FValue = 'nan') or (FValue = '+nan') or (FValue = '-nan')
+  then
+    Builder.Append(FValue)
+  else
+    inherited;
+end;
 
 end.

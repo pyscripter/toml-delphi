@@ -113,7 +113,7 @@ type
       procedure ParseToken; virtual; abstract;
       procedure UnknownCharacter(out cont: boolean); virtual;
     public
-      constructor Create(Bytes: TBytes);
+      constructor Create(Bytes: TBytes); virtual;
       procedure Parse; virtual;
       destructor Destroy; override;
   end;

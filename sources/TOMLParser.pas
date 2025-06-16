@@ -30,25 +30,44 @@ interface
 uses
   System.SysUtils,
   System.Classes,
+  System.JSON,
   System.Generics.Collections,
   Scanner,
   TOMLTypes;
 
 type
 
+  { TTOMLDocument }
+  TTOMLDocument = TJSONObject;
+  TTOMLTable = TJSONObject;
+  TTOMLArray = TJSONArray;
+  TTOMLDATA = TJSONValue;
+  TTOMLNumber = TJSONNumber;
+  TTOMLBoolean = TJSONBool;
+  TTOMLContainerList = TStack<TJsonObject>;
+
   TTOMLScanner = class(TScanner)
     private
       document: TTOMLDocument;
+      FDefinedTables: TList<TTOMLTable>;
+      FCreatedInline: TList<TTOMLTable>;
+      FImmutableList: TList<TJSONValue>;
       TableStack: TTOMLContainerList;
     private
+      // support functions
+      function GetOrCreateTable(AParent: TTOMLTable; Keys: TArray<string>; IsPairKey:
+          Boolean = False): TTOMLTable;
+      function FindValue(Table: TTOMLTable; Keys: TArray<string>): TJSONValue;
+      procedure AddPair(Table: TTOMLTable; Key: string; Value: TJsonValue);
+
       function ParseArray: TTOMLArray;
-      function ParseTable: TTOMLData;
+      procedure ParseTable;
       function ParseInlineTable: TTOMLTable;
-      function ParseArrayOfTables: TTOMLData;
+      procedure ParseArrayOfTables;
       function ParseString(AllowMultiline: Boolean = True): string;
-      function ParseDate(continueFromNumber: boolean = false): TTOMLDate;
-      function ParseTime(continueFromNumber: boolean = false;
-        IsOffset: Boolean = False): TTOMLDate.TTime;
+      function ParseDate(continueFromNumber: boolean): TBytes;
+      function ParseTime(continueFromNumber: boolean = false; IsOffset: Boolean =
+          False): TBytes;
       procedure ParsePair;
       function ParseValue: TTOMLData;
       function ParseKey: TArray<string>;
@@ -61,6 +80,7 @@ type
       function ReadNumber: string; override;
       function GetException: EScannerClass; override;
     public
+      constructor Create(Bytes: TBytes); override;
       destructor Destroy; override;
       procedure Parse; override;
   end;
@@ -82,10 +102,10 @@ var
 begin
   parser := TTOMLScanner.Create(contents);
 
-  // check whether the input is valid utf8
-  if not TEncoding.UTF8.IsBufferValid(contents) then
-    parser.ParserError('The input is not valid utf8');
   try
+    // check whether the input is valid utf8
+    if not TEncoding.UTF8.IsBufferValid(contents) then
+      parser.ParserError('The input is not valid utf8');
     parser.Parse;
     result := parser.document;
   finally
@@ -98,6 +118,45 @@ end;
 function TTOMLScanner.GetException: EScannerClass;
 begin
   result := ETOML;
+end;
+
+function TTOMLScanner.GetOrCreateTable(AParent: TTOMLTable; Keys:
+    TArray<string>; IsPairKey: Boolean = False): TTOMLTable;
+var
+  Table: TJSONValue;
+begin
+  while Length(keys) > 0 do
+  begin
+    Table := AParent.Values[Keys[0]];
+
+    if FImmutableList.Contains(Table) then
+      ParserError('You cannot extend immutable valuees');
+
+    if Table is TJSONArray then
+    begin
+      if TJSonArray(Table)[TJSonArray(Table).Count - 1] is TJSONObject then
+        Table := TJSonArray(Table)[TJSonArray(Table).Count - 1]
+      else
+        ParserError('You cannot redifine an existing key');
+    end
+    else if Assigned(Table) then
+    begin
+      if not (Table is TTOMLTable) or
+        (IsPairKey and FDefinedTables.Contains(TTOMLTable(Table)))
+      then
+        ParserError('You cannot redifine an existing key');
+    end
+    else if not Assigned(Table) then
+    begin
+      Table := TTOMLTable.Create;
+      if IsPairKey then
+        FCreatedInline.Add(TTOMLTable(Table));
+      AddPair(AParent, keys[0], Table);
+    end;
+    AParent := TTOMLTable(Table);
+    Delete(Keys, 0, 1);
+  end;
+  Result := AParent;
 end;
 
 function TTOMLScanner.ParseString(AllowMultiline: Boolean = True): string;
@@ -280,59 +339,48 @@ begin
   Assert(false, 'string termination error');
 end;
 
-function TTOMLScanner.ParseArrayOfTables: TTOMLData;
+procedure TTOMLScanner.ParseArrayOfTables;
 var
-  keys: TArray<string>;
-  table: TTOMLData;
-  parent, child: TTOMLTable;
-  arr: TTOMLArray;
-  i: integer;
+  ParentTable: TTOMLTable;
+  NewTable: TTOMLTable;
+  Keys: TArray<string>;
+  Arr: TTOMLArray;
+  Value: TJSONValue;
   StartLine: Integer;
 begin
   StartLine := fileInfo.line;
 
   Consume(TToken.SquareBracketOpen);
   Consume(TToken.SquareBracketOpen);
-  keys := ParseKey;
+  Keys := ParseKey;
 
-  //writeln('parse array of tables: ',keys.CommaText);
+  FDefinedTables.Add(TableStack.Peek);
+  FDefinedTables.AddRange(FCreatedInline.ToArray);
+  FCreatedInline.Clear;
 
   TableStack.Pop;
-  parent := TableStack.Peek;
 
-  for i := 0 to Length(keys) - 1 do
-    begin
-      table := parent.Find(keys[i]);
-      if table = nil then
-        begin
-          // add array as value for key and then add empty table
-          arr := TTOMLArray.Create;
-          child := TTOMLTable.Create(keys[i]);
-          child.parent := parent;
-          arr.Add(child);
+  Value := FindValue(TableStack.Peek, Keys);
+  if (Value <> nil) and not (Value is TTOMLArray) then
+    ParserError('You cannot redifine an existing key');
+  if FImmutableList.Contains(Value) then
+    ParserError('You cannot extend static table arrays');
 
-          parent.Add(child.Name, arr);
-          parent := child;
-        end
-      else if table is TTOMLTable then
-        parent := TTOMLTable(table)
-      else if table is TTOMLArray then
-        begin
-          // the last key should add a new table to the array
-          if i = length(keys) - 1 then
-            begin
-              child := TTOMLTable.Create(keys[i]);
-              TTOMLArray(table).Add(child);
-            end
-          else
-            child := TTOMLArray(table).Last as TTOMLTable;
-          parent := child;
-        end;
-    end;
+  if Value is TTOMLArray then
+    Arr := TTOMLArray(Value)
+  else
+  begin
+    // Create the parent table if needed and then create the array.
+    ParentTable := GetOrCreateTable(TableStack.Peek,
+      Copy(Keys, 0, Length(Keys) - 1));
+    Arr :=  TTOMLArray.Create;
+    AddPair(ParentTable, Keys[Length(Keys) - 1], Arr);
+  end;
+  NewTable := TTOMLTable.Create;
+  Arr.Add(NewTable);
 
-  // push table
-  TableStack.Push(parent);
-  result := parent;
+  // push the new table
+  TableStack.Push(NewTable);
 
   if c <>  ']' then
     ParserError('Table array headers must end with "]]"');
@@ -348,61 +396,60 @@ begin
     ParserError('Table array headers must finish with EOL');
 end;
 
-function TTOMLScanner.ParseTable: TTOMLData;
+procedure TTOMLScanner.ParseTable;
 var
-  keys: TArray<string>;
-  table: TTOMLData;
-  parent, child: TTOMLTable;
-  i: integer;
+  Keys: TArray<string>;
+  ParentTable: TTOMLTable;
+  NewTable: TTOMLTable;
+  Value: TJSONValue;
   StartLine: Integer;
 begin
   StartLine := fileInfo.line;
 
   if c = '[' then
-    exit(ParseArrayOfTables);
+  begin
+    ParseArrayOfTables;
+    Exit;
+  end;
 
   Consume(TToken.SquareBracketOpen);
-  // parse array of tables
-  keys := ParseKey;
+  Keys := ParseKey;
 
-  //writeln('parse table: ',keys.CommaText);
+  FDefinedTables.Add(TableStack.Peek);
+  FDefinedTables.AddRange(FCreatedInline.ToArray);
+  FCreatedInline.Clear;
 
   TableStack.Pop;
-  parent := TableStack.Peek;
 
-  for i := 0 to Length(keys) - 1 do
+  Value := FindValue(TableStack.Peek, Keys);
+  if Value <> nil then
+  begin
+    if Value is TTOMLTable then
     begin
-      table := parent.Find(keys[i]);
-      if table = nil then
-        begin
-          child := TTOMLTable.Create(keys[i]);
-          parent.Add(child.Name, child);
-          parent := child;
-        end
-      else if table is TTOMLTable then
-        begin
-          // the final key defines a new table
-          // which is illegal if
-          if (i = Length(keys) - 1) and TTOMLTable(table).defined then
-            ParserError('Table "'+keys[i]+'" is already defined')
-          else
-            parent := TTOMLTable(table);
-        end
-      else if table is TTOMLArray then
-        begin
-          child := TTOMLArray(table).Last as TTOMLTable;
-          parent := child;
-        end
-      else
-        ParserError('Key "'+keys[i]+'" is already defined as a value.');
+      // defining a super table
+      NewTable := TTOMLTable(Value);
+      if FDefinedTables.Contains(NewTable) then
+        ParserError('You cannot redefine a table');
+    end
+    else
+    begin
+      ParserError('You cannot redifine an existing key');
+      Exit; // To avoid warning about NewTable not initialized
     end;
-
-  // the final table is now defined
-  parent.defined := true;
+  end
+  else
+  begin
+    // Create the parent table if needed and then create this table
+    ParentTable := GetOrCreateTable(TableStack.Peek,
+      Copy(Keys, 0, Length(Keys) - 1));
+    if Assigned(ParentTable.Values[Keys[Length(Keys) - 1]]) then
+      ParserError('You cannot redifine an existing key');
+    NewTable :=  TTOMLTable.Create;
+    AddPair(ParentTable, Keys[Length(Keys) - 1], NewTable);
+  end;
 
   // push table
-  TableStack.Push(parent);
-  result := parent;
+  TableStack.Push(NewTable);
 
   if (fileInfo.Line > StartLine) then
     ParserError('Table headers must be on a single line');
@@ -413,9 +460,6 @@ begin
     ParserError('Tables headers must finish with EOL');
 end;
 
-{ Parse inline tables
-  https://toml.io/en/v1.0.0-rc.1#inline-table }
-
 function TTOMLScanner.ParseInlineTable: TTOMLTable;
 begin
   // inline tables don't allow newlines so we can override the newline behavior
@@ -425,9 +469,9 @@ begin
   Consume(TToken.CurlyBracketOpen);
 
   // push new table to stack
-  result := TTOMLTable.Create;
-  TableStack.Push(result);
+  Result := TTOMLTable.Create;
 
+  TableStack.Push(Result);
   try
     while not TryConsume(TToken.CurlyBracketClosed) do
     begin
@@ -438,7 +482,7 @@ begin
         // curly bracket found for pair
         if TryConsume(TToken.CurlyBracketClosed) then
           ParserError('Inline tables do not allow trailing commas.');
-        continue;
+        Continue;
       end
       else
       begin
@@ -450,68 +494,74 @@ begin
     readLineEndingsAsTokens := false;
     TryConsume(TToken.EOL);
   except
-    result.Free;
+    Result.Free;
     raise;
   end;
 
-  result.terminated := true;
-
+  FImmutableList.Add(Result);
+  FDefinedTables.Add(Result);
+  FDefinedTables.AddRange(FCreatedInline.ToArray);
+  FCreatedInline.Clear;
   TableStack.Pop;
 end;
 
-
 function TTOMLScanner.ParseArray: TTOMLArray;
 var
-  value: TTOMLData;
+  Value: TTOMLData;
   oldreadLineEndingsAsTokens: Boolean;
 begin
   oldreadLineEndingsAsTokens := readLineEndingsAsTokens;
   readLineEndingsAsTokens := False;
 
   Consume(TToken.SquareBracketOpen);
-  result := TTOMLArray.Create;
-  result.terminated := true;
+  Result := TTOMLArray.Create;
 
-
-  while not TryConsume(TToken.SquareBracketClosed) do
-  begin
-    value := ParseValue;
-    result.Add(value);
-    if not TryConsume(TToken.Comma) then
+  try
+    while not TryConsume(TToken.SquareBracketClosed) do
     begin
-      Consume(TToken.SquareBracketClosed);
-      Break;
+      Value := ParseValue;
+      Result.AddElement(Value);
+      if not TryConsume(TToken.Comma) then
+      begin
+        Consume(TToken.SquareBracketClosed);
+        Break;
+      end;
     end;
+    readLineEndingsAsTokens := oldreadLineEndingsAsTokens;
+  except
+    Result.Free;
+    raise;
   end;
-  readLineEndingsAsTokens := oldreadLineEndingsAsTokens;
+
+  FImmutableList.Add(Result);
 end;
 
 function TTOMLScanner.ParseValue: TTOMLData;
 
-  function ParseNamedValue(negative: boolean = false): TTOMLData;
+  function ParseNamedValue(Negative: Boolean = False): TTOMLData;
   var
     valueString: string;
   begin
-    result := nil;
+    Result := nil;
     valueString := TEncoding.Utf8.GetString(pattern);
     if (valueString = 'false') or (valueString = 'true') then
       begin
-        if negative then
+        if Negative then
           ParserError('Negative booleans are invalid');
-        result := TTOMLNumber.Create(StrToBool(valueString), TTOMLNumberType.Boolean);
+        Result := TTOMLBoolean.Create(StrToBool(valueString));
         Consume;
       end
     else if valueString = 'inf' then
       begin
-        if negative then
-          result := TTOMLNumber.Create(-1/0, TTOMLNumberType.Float)
+        if Negative then
+          Result := TJSONFloat.Create('-inf')
         else
-          result := TTOMLNumber.Create(1/0, TTOMLNumberType.Float);
+          Result := TJSONFloat.Create('inf');
         Consume;
       end
     else if valueString = 'nan' then
       begin
-        result := TTOMLNumber.Create(0/0, TTOMLNumberType.Float);
+          Result := TJSONFloat.Create('nan');
         Consume;
       end;
   end;
@@ -559,20 +609,20 @@ begin
 
   case token of
     TToken.DoubleQuote:
-      result := TTOMLValue.Create(ParseString);
+      result := TJSONString.Create(ParseString);
     TToken.SingleQuote:
-      result := TTOMLValue.Create(ParseString);
+      result := TJSONString.Create(ParseString);
     TToken.Integer:
       begin
         // the integer is a possible date so switch parsers
         if (Length(pattern) = 4) and (c = '-') then
           begin
-            result := ParseDate(true);
+            result := TJSONString.Create(TEncoding.UTF8.GetString(ParseDate(True)));
             Consume;
           end
         else if (Length(pattern) = 2) and (c = ':') then
           begin
-            result := TTOMLDate.Create(ParseTime(true));
+            result := TJSONString.Create(TEncoding.UTF8.GetString(ParseTime(True)));
             Consume;
           end
         else
@@ -584,8 +634,13 @@ begin
               ParserError('Numbers with leading zeros not allowed');
 
             str := TEncoding.UTF8.GetString(pattern);
-            result := TTOMLNumber.Create(StrToInt64(str), TTOMLNumberType.Integer);
-            Consume;
+            result := TTOMLNumber.Create(str);
+            try
+              Consume;
+            except
+              result.Free;
+              raise;
+            end;
           end;
       end;
     TToken.HexadecimalNumber:
@@ -593,21 +648,21 @@ begin
         if pattern[0] in [Ord('+'), Ord('-')] then
           ParserError('Hex numbers should not have a sign');
         str := TEncoding.UTF8.GetString(pattern);
-        result := TTOMLNumber.Create(StrToInt64(str), TTOMLNumberType.Hexadecimal);
+        result := TTOMLNumber.Create(StrToInt64(str));
         Consume;
       end;
     TToken.OctalNumber:
       begin
         if pattern[0] in [Ord('+'), Ord('-')] then
           ParserError('Octal numbers should not have a sign');
-        result := TTOMLNumber.Create(OctalToInt(TEncoding.UTF8.GetString(pattern)), TTOMLNumberType.Octal);
+        result := TTOMLNumber.Create(OctalToInt(TEncoding.UTF8.GetString(pattern)));
         Consume;
       end;
     TToken.BinaryNumber:
       begin
         if pattern[0] in [Ord('+'), Ord('-')] then
           ParserError('Binary numbers should not have a sign');
-        result := TTOMLNumber.Create(BinToInt(TEncoding.UTF8.GetString(pattern)), TTOMLNumberType.Binary);
+        result := TTOMLNumber.Create(BinToInt(TEncoding.UTF8.GetString(pattern)));
         Consume;
       end;
     TToken.RealNumber:
@@ -619,7 +674,7 @@ begin
           ParserError('Numbers with leading zeros not allowed');
 
         str := TEncoding.UTF8.GetString(pattern);
-        result := TTOMLNumber.Create(StrToFloat(str), TTOMLNumberType.Float);
+        result := TTOMLNumber.Create(str);
         Consume;
       end;
     TToken.SquareBracketOpen:
@@ -695,91 +750,43 @@ begin
     end;
 end;
 
-{ Parse key/value pair
-  https://toml.io/en/v1.0.0-rc.1#keyvalue-pair }
-
 procedure TTOMLScanner.ParsePair;
 var
-  keys: TArray<string>;
-  lastKey: TTOMLData;
-  table, value: TTOMLData;
-  child, parent: TTOMLTable;
-  i: integer;
+  Keys: TArray<string>;
+  ParentTable: TTOMLTable;
+  Value: TJSONValue;
   StartLine: Integer;
 begin
   StartLine := fileInfo.line;
 
-  keys := ParseKey;
+  Keys := ParseKey;
   Consume(TToken.Equals);
 
   if fileInfo.line > StartLine then
     ParserError('In key-value pairs, the key and value must be on the same line');
 
-  //writeln('parse pair: ',keys.CommaText);
-
-  parent := TableStack.Peek;
+  Value := FindValue(TableStack.Peek, Keys);
+  if Value <> nil then
+    ParserError('You cannot redefine an existing key');
 
   // add dotted keys as tables
-  if Length(keys) > 1 then
-    begin
-      for i := 0 to Length(keys) - 2 do
-        begin
-          table := parent.Find(keys[i]);
-          if table = nil then
-            begin
-              child := TTOMLTable.Create;
-              parent.Add(keys[i], child);
-              parent := child;
-            end
-          else if table is TTOMLTable then
-            parent := TTOMLTable(table)
-          else if table is TTOMLArray then
-            begin
-              // the node at the current key is a fully defined array
-              {
-                list.items = [1,2,3]
-                list.items.more = 1  # ERROR
-              }
-              if TTOMLArray(table).terminated then
-                ParserError('Dotted key "'+keys[i]+'", can''t index into array');
-              child := TTOMLArray(table).Last as TTOMLTable;
-              parent := child;
-            end;
-        end;
-    end;
+  ParentTable := GetOrCreateTable(TableStack.Peek,
+    Copy(Keys, 0, Length(Keys) - 1), True);
 
-  value := ParseValue;
-  try
-    if (length(keys) <= 1) and (parent.Find(keys[0]) <> nil) then
-      begin
-        if (value is TTOMLTable) and (TTOMLTable(value).terminated) then
-          ParserError('Inline tables can not replace partially defined tables');
-      end;
+  if FDefinedTables.Contains(ParentTable) then
+    ParserError('You cannot redefine a table');
 
-    if parent.terminated then
-      ParserError('Additional keys can not be added to fully defined inline tables');
+  Value := ParseValue;
 
-    // push the last key to the parent table
-    if Length(keys) > 1 then
-      begin
-        lastKey := parent.Find(keys[Length(keys) - 2]);
-        if (lastKey <> nil) and (lastKey is TTOMLValue) then
-          ParserError('"'+keys[Length(keys) - 2]+'" is already defined as '+TTOMLValue(lastKey).TypeString);
-      end;
-  except
-    value.Free;
-    raise;
-  end;
-
-  parent.defined := true;
-
-  parent.Add(keys[Length(keys) - 1], value);
+  AddPair(ParentTable, keys[Length(keys) - 1], Value);
 end;
 
 function TTOMLScanner.ReadDigits(digits: integer; decimals: boolean = false): string;
+var
+  Len: Integer;
 begin
-  pattern := [];
-  while Length(pattern) < digits do
+  Len := Length(Pattern);
+  while Length(pattern) < Len + digits do
     begin
       if not (c in ['0'..'9']) then
         ParserError('Expected '+ digits.ToString + ' digits but got "' +
@@ -797,113 +804,104 @@ begin
         AdvancePattern;
     end;
 
-  result := TEncoding.UTF8.GetString(pattern);
+  result := TEncoding.UTF8.GetString(Copy(pattern, Len));
 end;
 
 function TTOMLScanner.ParseTime(continueFromNumber: boolean = false; IsOffset:
-    Boolean = False): TTOMLDate.TTime;
+    Boolean = False): TBytes;
+var
+  Hours, Minutes: Integer;
+  Seconds: double;
 begin
   // hours
   // the parsing is being continued from a number
   // so the hour is already in the pattern buffer
   if continueFromNumber then
-    result.hours := StrToInt(TEncoding.UTF8.GetString(pattern))
+    Hours := StrToInt(TEncoding.UTF8.GetString(pattern))
   else
-    result.hours := StrToInt(ReadDigits(2));
+    Hours := StrToInt(ReadDigits(2));
   Consume(':');
 
   // minutes
-  result.minutes := StrToInt(ReadDigits(2));
+  Minutes := StrToInt(ReadDigits(2));
 
   // seconds only if it is not an offset
   if not IsOffset then
     begin
       Consume(':');
-      result.seconds := StrToFloat(ReadDigits(2, true));
+      Seconds := StrToFloat(ReadDigits(2, true));
     end
   else
-    result.seconds := 0;
+    Seconds := 0;
 
-  if (result.hours >= HoursPerDay) or (result.minutes >= MinsPerHour) or
-    (result.seconds >= SecsPerMin)
+  if (Hours >= HoursPerDay) or (Minutes >= MinsPerHour) or
+    (Seconds >= SecsPerMin)
   then
     ParserError('Invalid time');
+
+  Result := Copy(pattern);
 end;
 
-function TTOMLScanner.ParseDate(continueFromNumber: boolean): TTOMLDate;
+function TTOMLScanner.ParseDate(continueFromNumber: boolean): TBytes;
 var
-  date: TTOMLDate;
+  Year, Month, Day: Integer;
   HasTime: Boolean;
-  PositiveOffset: Boolean;
   LDate: TDateTime;
 begin
-  date := TTOMLDate.Create;
-  try
-    // the parsing is being continued from a number
-    // so the year is already in the pattern buffer
-    if continueFromNumber then
-      date.year := StrToInt(TEncoding.UTF8.GetString(pattern))
-    else
-      date.year := StrToInt(ReadDigits(4));
-    Consume('-');
+  // the parsing is being continued from a number
+  // so the year is already in the pattern buffer
+  if continueFromNumber then
+    Year := StrToInt(TEncoding.UTF8.GetString(pattern))
+  else
+    Year := StrToInt(ReadDigits(4));
+  Consume('-');
 
-    // month
-    date.month := StrToInt(ReadDigits(2));
+  // month
+  Month := StrToInt(ReadDigits(2));
 
-    // day
-    Consume('-');
-    date.day := StrToInt(ReadDigits(2));
+  // day
+  Consume('-');
+  Day := StrToInt(ReadDigits(2));
 
-    if not TryEncodeDate(date.year, date.month, date.day, LDate) then
-      ParserError('Invalid date');
+  if not TryEncodeDate(Year, Month, Day, LDate) then
+    ParserError('Invalid date');
 
-    // the date is a solo year
-    if IsLineEnding or IsEOF then
-      begin
-        result := date;
-        exit;
-      end;
-
-    // Date must be separated by single space or "T" from time
-    // but time may be missing
-
-    HasTime := UpCase(c) = 'T';
-    if HasTime or (c = ' ') then
+  // the date is a solo year
+  if IsLineEnding or IsEOF then
     begin
-      Advance(1);
+      Result := Copy(pattern);
+      Exit;
+    end;
 
-      HasTime := HasTime or (c in ['0'..'9']);
-      if HasTime then
+  // Date must be separated by single space or "T" from time
+  // but time may be missing
+
+  HasTime := UpCase(c) = 'T';
+  if HasTime or (c = ' ') then
+  begin
+    Advance(1);
+
+    HasTime := HasTime or (c in ['0'..'9']);
+    if HasTime then
+    begin
+      pattern := pattern + [Ord('T')];
+      // hour
+      ParseTime;
+
+      // zulu
+      if UpCase(c) = 'Z' then
+        AdvancePattern(1);
+
+      // offset time
+      if c in ['+', '-'] then
       begin
-        // hour
-        date.time := ParseTime;
-
-        // zulu
-        if UpCase(c) = 'Z' then
-        begin
-          Advance(1);
-          date.time.z := true;
-        end;
-
-        // offset time
-        if c in ['+', '-'] then
-        begin
-          PositiveOffset := c = '+';
-          Advance(1);;
-          date.offset := ParseTime(False, True);
-          if PositiveOffset then
-            date.offset.hours := -date.offset.hours;
-        end;
+        AdvancePattern(1);;
+        ParseTime(False, True);
       end;
     end;
-  except
-    date.Free;
-    raise;
   end;
 
-  pattern := [];
-
-  result := date;
+  result := Copy(pattern);
 end;
 
 function TTOMLScanner.ReadNumber: string;
@@ -1129,8 +1127,7 @@ end;
 
 procedure TTOMLScanner.Parse;
 begin
-  TableStack := TTOMLContainerList.Create;
-  document := TTOMLDocument.Create('document');
+  document := TTOMLDocument.Create();
   try
     // Push twice so that it stays at the top once the document
     // key/value pair are processed and the first subtable is found
@@ -1143,12 +1140,57 @@ begin
   end;
 end;
 
+procedure TTOMLScanner.AddPair(Table: TTOMLTable; Key: string;
+  Value: TJsonValue);
+// To allow empty keys
+begin
+  Table.AddPair(TJSONPair.Create(Key, Value));
+end;
+
+constructor TTOMLScanner.Create(Bytes: TBytes);
+begin
+  inherited;
+  FDefinedTables := TList<TTOMLTable>.Create;
+  FCreatedInline := TList<TTOMLTable>.Create;
+  TableStack := TTOMLContainerList.Create;
+  FImmutableList := TList<TJSONValue>.Create;
+end;
+
 destructor TTOMLScanner.Destroy;
 begin
   TableStack.Free;
-
+  FDefinedTables.Free;
+  FCreatedInline.Free;
+  FImmutableList.Free;
   inherited;
 end;
 
+function TTOMLScanner.FindValue(Table: TTOMLTable;
+  Keys: TArray<string>): TJSONValue;
+// Deals with empty keys
+var
+  Key: string;
+  Arr: TJsonArray;
+begin
+  Result := Table;
+  for Key in Keys do
+  begin
+    if Result is TJSONObject  then
+      Result := TJSONObject(Result).Values[Key]
+    else if Result is TJSONArray  then
+    begin
+      Arr := TJSONArray(Result);
+      if (Arr.Count > 0) and (Arr[Arr.Count - 1] is TJSONObject) then
+        Result := TJSONObject(Arr[Arr.Count - 1]).Values[Key]
+      else
+        Result := nil;
+    end
+    else
+      Result := nil;
+
+    if Result = nil then
+      Exit;
+  end;
+end;
 
 end.
