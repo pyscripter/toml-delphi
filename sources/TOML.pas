@@ -54,7 +54,7 @@ type
 implementation
 
 uses
-  TOML.Types,
+  TOML.Support,
   System.Json.Serializers,
   System.Json.Readers,
   System.Json.Writers;

@@ -34,7 +34,7 @@ uses
   System.JSON,
   System.Generics.Collections,
   TOML.Scanner,
-  TOML.Types;
+  TOML.Support;
 
 type
 

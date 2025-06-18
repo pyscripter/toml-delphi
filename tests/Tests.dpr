@@ -10,7 +10,7 @@ uses
   System.Generics.Collections,
   TOML.Scanner in '..\sources\TOML.Scanner.pas',
   TOML.Parser in '..\sources\TOML.Parser.pas',
-  TOML.Types in '..\sources\TOML.Types.pas',
+  TOML.Support in '..\sources\TOML.Support.pas',
   TOML in '..\sources\TOML.pas',
   TOML.Writer in '..\sources\TOML.Writer.pas';
 

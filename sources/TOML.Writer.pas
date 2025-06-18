@@ -9,7 +9,7 @@ uses
   System.DateUtils,
   System.JSON,
   System.Math,
-  TOML.Types;
+  TOML.Support;
 
 const
   MAX_LINE_LENGTH = 100;
@@ -375,7 +375,6 @@ end;
 
 function TTOMLWriterImpl.ToTOML(Obj: TJSONObject): string;
 var
-  Ctx: TContext;
   Writer: TStringWriter;
 begin
   FCxt := TContext.Create(FMultilineStrings, FIndent);
