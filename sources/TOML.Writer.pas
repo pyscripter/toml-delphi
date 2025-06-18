@@ -210,7 +210,7 @@ end;
 class function TTOMLWriterImpl.FormatInlineTable(Obj: TJSONObject; const Ctx: TContext): string;
 var
   Pair: TJSONPair;
-  Items: TStringList;
+  Items: TList<string>;
   I: Integer;
 begin
   if Ctx.InlineTableCache.ContainsKey(Obj) then
@@ -220,14 +220,14 @@ begin
     Result := '{}'
   else
   begin
-    Items := TStringList.Create;
+    Items := TList<string>.Create;
     try
       for I := 0 to Obj.Count - 1 do
       begin
         Pair := Obj.Pairs[I];
         Items.Add(FormatKeyPart(Pair.JsonString.Value) + ' = ' + FormatLiteral(Pair.JsonValue, Ctx));
       end;
-      Result := '{ ' + String.Join(', ', Items.ToStringArray) + ' }';
+      Result := '{ ' + String.Join(', ', Items.ToArray) + ' }';
     finally
       Items.Free;
     end;
