@@ -11,7 +11,8 @@ uses
   TOML.Scanner in '..\sources\TOML.Scanner.pas',
   TOML.Parser in '..\sources\TOML.Parser.pas',
   TOML.Types in '..\sources\TOML.Types.pas',
-  TOML in '..\sources\TOML.pas';
+  TOML in '..\sources\TOML.pas',
+  TOML.Writer in '..\sources\TOML.Writer.pas';
 
 function JsonValuesEqual(Value1, Value2: TJsonValue): Boolean;
 var
@@ -121,7 +122,7 @@ begin
       Doc := nil;
 
       try
-        Doc := GetTOML(Path);
+        Doc := TJSONObject.FromTOMLFile(Path);
         if ExpectedFail then
         begin
           OutputResult(False, FileInfo);
@@ -148,7 +149,10 @@ begin
           end;
       end;
       if ShowJSON and Assigned(Doc) then
-        writeln(Doc.Format);
+      begin
+        Writeln(Doc.Format);
+        Writeln(TTOMLWriter.ToTOML(Doc));
+      end;
       Doc.Free;
     end;
 
@@ -160,9 +164,45 @@ begin
   WriteLn;
 end;
 
+type
+  TTestRec = record
+    IntValue: Integer;
+    FloatValue: double;
+    StringValue: string;
+    DateValue: TDateTime;
+    ArrayValue: TArray<string>;
+ end;
+
+ procedure TestSerializer;
+ var
+   Rec: TTestRec;
+   TOMLString: string;
+ begin
+   Rec.IntValue := 123;
+   Rec.FloatValue := 3.14;
+   Rec.StringValue := 'abc';
+   Rec.DateValue := Now;
+   Rec.ArrayValue := ['A', 'B', 'C'];
+
+   Writeln('Serialized record:');
+   WriteLn('==================');
+   TOMLString := TTOMLSerializer.Serialize(Rec);
+   Writeln(TOMLString);
+   Writeln('Record deserialized and serialized again:');
+   Writeln('=========================================');
+   Rec := TTOMLSerializer.Deserialize<TTestRec>(TOMLString);
+   TOMLString := TTOMLSerializer.Serialize(Rec);
+   Writeln(TOMLString);
+ end;
+
+
 begin
   ReportMemoryLeaksOnShutdown := True;
   SetConsoleOutputCP(CP_UTF8);
+
+//  TestSerializer;
+//  Readln;
+//  Exit;
 
   BasePath := TPath.GetFullPath('.\toml-test\tests');
 

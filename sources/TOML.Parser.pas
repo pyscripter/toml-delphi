@@ -38,7 +38,7 @@ uses
 
 type
 
-  TTOMLScanner = class(TScanner)
+  TTOMLParser = class(TScanner)
     private
       document: TJSONObject;
       FDefinedTables: TList<TJSONObject>;
@@ -75,9 +75,9 @@ type
       constructor Create(Bytes: TBytes); override;
       destructor Destroy; override;
       procedure Parse; override;
+      class function TOMLToJson(Contents: TBytes): TJSONObject;
   end;
 
-function GetTOML(Contents: TBytes): TJSONObject;
 
 implementation
 
@@ -90,7 +90,7 @@ resourcestring
   rsCannotRedefineKey = 'Cannot redefine an existing key';
   rsInvalidUtf8 = 'Invalid utf8 input';
   rsCannotExtendImmutableValues = 'Cannot extend immutable values';
-  rsInvalidCharacter = 'Invalid character "#%d in string';
+  rsInvalidStringCharacter = 'Invalid character "#%d in string';
   rsInvalidLineBreak = 'Invalid line break: CR without LF';
   rsInvalidUnicodeCharacter = 'Unicode characters need to be unicode scalars';
   rsInvalidEscapeChar = 'Invalid string escape char: "%s"';
@@ -135,12 +135,11 @@ resourcestring
 type
   ETOML = class(EScanner);
 
-function GetTOML(Contents: TBytes): TJSONObject;
+class function TTOMLParser.TOMLToJson(Contents: TBytes): TJSONObject;
 var
-  Parser: TTOMLScanner;
+  Parser: TTOMLParser;
 begin
-  Parser := TTOMLScanner.Create(Contents);
-
+  Parser := TTOMLParser.Create(Contents);
   try
     // check whether the input is valid utf8
     if not TEncoding.UTF8.IsBufferValid(Contents) then
@@ -152,14 +151,14 @@ begin
   end;
 end;
 
-{ TTOMLScanner }
+{ TTOMLParser }
 
-function TTOMLScanner.GetException: EScannerClass;
+function TTOMLParser.GetException: EScannerClass;
 begin
   result := ETOML;
 end;
 
-function TTOMLScanner.GetOrCreateTable(AParent: TJSONObject; Keys:
+function TTOMLParser.GetOrCreateTable(AParent: TJSONObject; Keys:
     TArray<string>; IsPairKey: Boolean = False): TJSONObject;
 var
   Table: TJSONValue;
@@ -198,7 +197,7 @@ begin
   Result := AParent;
 end;
 
-function TTOMLScanner.ParseString(AllowMultiline: Boolean = True): string;
+function TTOMLParser.ParseString(AllowMultiline: Boolean = True): string;
 var
   quote: AnsiChar;
   scalar: Cardinal;
@@ -221,8 +220,8 @@ begin
         ReadChar;
 
       // Control character validation
-      if (c in [#$0..#$8,#$A..#$1F, #$7F]) and not (multiline and IsLineEnding) then
-        ParserError(Format(rsInvalidCharacter, [Ord(c)]));
+      if (c in CharSetIllegalStr) and not (multiline and IsLineEnding) then
+        ParserError(Format(rsInvalidStringCharacter, [Ord(c)]));
 
       // EOL validation
       if c = #13 then
@@ -378,7 +377,7 @@ begin
   Assert(False, rsInputTerminationError);
 end;
 
-procedure TTOMLScanner.ParseArrayOfTables;
+procedure TTOMLParser.ParseArrayOfTables;
 var
   ParentTable: TJSONObject;
   NewTable: TJSONObject;
@@ -435,7 +434,7 @@ begin
     ParserError(rsTableArrayHeadersEOL);
 end;
 
-procedure TTOMLScanner.ParseTable;
+procedure TTOMLParser.ParseTable;
 var
   Keys: TArray<string>;
   ParentTable: TJSONObject;
@@ -499,7 +498,7 @@ begin
     ParserError(rsTableArrayHeadersEOL);
 end;
 
-function TTOMLScanner.ParseInlineTable: TJSONObject;
+function TTOMLParser.ParseInlineTable: TJSONObject;
 begin
   // inline tables don't allow newlines so we can override the newline behavior
   // of the scanner by enabling newlines as tokens
@@ -544,7 +543,7 @@ begin
   TableStack.Pop;
 end;
 
-function TTOMLScanner.ParseArray: TJSONArray;
+function TTOMLParser.ParseArray: TJSONArray;
 var
   Value: TJSONValue;
   oldreadLineEndingsAsTokens: Boolean;
@@ -575,7 +574,7 @@ begin
   FImmutableList.Add(Result);
 end;
 
-function TTOMLScanner.ParseValue: TJSONValue;
+function TTOMLParser.ParseValue: TJSONValue;
 
   function ParseNamedValue(Negative: Boolean = False): TJSONValue;
   var
@@ -739,7 +738,7 @@ begin
   Assert(result <> nil, Format(rsUnexpectedToken, [token.ToString]));
 end;
 
-function TTOMLScanner.ParseKey: TArray<string>;
+function TTOMLParser.ParseKey: TArray<string>;
 begin
   { *Bare* keys may only contain ASCII letters, ASCII digits, underscores, and dashes (A-Za-z0-9_-).
     Note that bare keys are allowed to be composed of only ASCII digits, e.g. 1234,
@@ -760,21 +759,21 @@ begin
       else if token = TToken.Integer then
         begin
           if c in ['a'..'z','A'..'Z','_','-'] then  // e.g. 2004-abc
-            Consume(['0'..'9', 'a'..'z','A'..'Z','_','-']);
+            Consume(CharSetBareKey);
           result := result + [TEncoding.UTF8.GetString(pattern)];
           Consume;
         end
       else if token = TToken.RealNumber then  // e.g. 1.2   = true
         begin
           if c in ['a'..'z','A'..'Z','_','-'] then
-            Consume(['0'..'9', 'a'..'z','A'..'Z','_','-']);
+            Consume(CharSetBareKey);
           result := result + TEncoding.UTF8.GetString(pattern).Split(['.']);
           Consume;
         end
       else if token = TToken.Dash then
         begin
           if c in ['a'..'z','A'..'Z','_','-'] then
-            Consume(['0'..'9', 'a'..'z','A'..'Z','_','-']);
+            Consume(CharSetBareKey);
           result := result + TEncoding.UTF8.GetString(pattern).Split(['.']);
           Consume;
         end
@@ -789,7 +788,7 @@ begin
     end;
 end;
 
-procedure TTOMLScanner.ParsePair;
+procedure TTOMLParser.ParsePair;
 var
   Keys: TArray<string>;
   ParentTable: TJSONObject;
@@ -820,7 +819,7 @@ begin
   AddPair(ParentTable, keys[Length(keys) - 1], Value);
 end;
 
-function TTOMLScanner.ReadDigits(digits: integer; decimals: Boolean = False): string;
+function TTOMLParser.ReadDigits(digits: integer; decimals: Boolean = False): string;
 var
   Len: Integer;
 begin
@@ -845,7 +844,7 @@ begin
   result := TEncoding.UTF8.GetString(Copy(pattern, Len));
 end;
 
-function TTOMLScanner.ParseTime(continueFromNumber: Boolean = false; IsOffset:
+function TTOMLParser.ParseTime(continueFromNumber: Boolean = false; IsOffset:
     Boolean = False): TBytes;
 var
   Hours, Minutes: Integer;
@@ -880,7 +879,7 @@ begin
   Result := Copy(pattern);
 end;
 
-function TTOMLScanner.ParseDate(continueFromNumber: Boolean): TBytes;
+function TTOMLParser.ParseDate(continueFromNumber: Boolean): TBytes;
 var
   Year, Month, Day: Integer;
   HasTime: Boolean;
@@ -942,7 +941,7 @@ begin
   result := Copy(pattern);
 end;
 
-function TTOMLScanner.ReadNumber: string;
+function TTOMLParser.ReadNumber: string;
 
   function LastChar: AnsiChar;
   begin
@@ -1106,17 +1105,17 @@ begin
   result := TEncoding.UTF8.GetString(pattern);
 end;
 
-function TTOMLScanner.ReadWord: TScanner.TIdentifier;
+function TTOMLParser.ReadWord: TScanner.TIdentifier;
 begin
   pattern := [];
   // TODO: words must start with alphas and quotes are allowed
   // dashes must have be adjacent to at least 1 alpha
-  while c in ['a'..'z','A'..'Z','0'..'9','_','-'] do
+  while c in CharSetBareKey do
     AdvancePattern;
   result := TEncoding.UTF8.GetString(pattern);
 end;
 
-procedure TTOMLScanner.UnknownCharacter(out cont: Boolean);
+procedure TTOMLParser.UnknownCharacter(out cont: Boolean);
 begin
   case c of
     '"':
@@ -1137,7 +1136,7 @@ begin
   end;
 end;
 
-procedure TTOMLScanner.ParseToken;
+procedure TTOMLParser.ParseToken;
 var
   OldLine: Integer;
 begin
@@ -1163,7 +1162,7 @@ begin
   end;
 end;
 
-procedure TTOMLScanner.Parse;
+procedure TTOMLParser.Parse;
 begin
   document := TJSONObject.Create();
   try
@@ -1178,14 +1177,14 @@ begin
   end;
 end;
 
-procedure TTOMLScanner.AddPair(Table: TJSONObject; Key: string;
+procedure TTOMLParser.AddPair(Table: TJSONObject; Key: string;
   Value: TJsonValue);
 // To allow empty keys
 begin
   Table.AddPair(TJSONPair.Create(Key, Value));
 end;
 
-constructor TTOMLScanner.Create(Bytes: TBytes);
+constructor TTOMLParser.Create(Bytes: TBytes);
 begin
   inherited;
   FDefinedTables := TList<TJSONObject>.Create;
@@ -1194,7 +1193,7 @@ begin
   FImmutableList := TList<TJSONValue>.Create;
 end;
 
-destructor TTOMLScanner.Destroy;
+destructor TTOMLParser.Destroy;
 begin
   TableStack.Free;
   FDefinedTables.Free;
@@ -1203,7 +1202,7 @@ begin
   inherited;
 end;
 
-function TTOMLScanner.FindValue(Table: TJSONObject;
+function TTOMLParser.FindValue(Table: TJSONObject;
   Keys: TArray<string>): TJSONValue;
 // Deals with empty keys
 var

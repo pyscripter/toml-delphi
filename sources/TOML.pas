@@ -26,36 +26,145 @@ uses
   System.SysUtils,
   System.Classes,
   System.JSON,
-  TOML.Parser;
+  TOML.Parser,
+  TOML.Writer;
 
-function GetTOML(Contents: TBytes): TJSONObject; overload;
-function GetTOML(Stream: TStream): TJSONObject; overload;
-function GetTOML(FileName: string): TJSONObject; overload;
+type
+  TTOMLDocument = TJSONObject;
+  TTOMLParser = TOML.Parser.TTOMLParser;
+  TTOMLWriter = TOML.Writer.TTOMLWriter;
+
+  TJSONObjectHelper = class helper for TJSONObject
+    function ToTOML(MultilineStrings: Boolean = False; Indent: Integer = 4): string;
+    procedure StreamTOML(Stream: TStream; MultilineStrings: Boolean = False; Indent: Integer = 4);
+    procedure SaveTOMLtoFile(const FileName: string; MultilineStrings: Boolean = False; Indent: Integer = 4);
+    class function FromTOML(const Contents: string): TJSONObject; overload;
+    class function FromTOML(Contents: TBytes): TJSONObject; overload;
+    class function FromTOML(Stream: TStream): TJSONObject; overload;
+    class function FromTOMLFile(const FileName: string): TJSONObject;
+  end;
+
+  ETOMLSerializer = class(Exception);
+
+  TTOMLSerializer = class
+    class function Serialize<T>(const AValue: T): string; overload;
+    class function Deserialize<T>(const ATOML: string): T; overload;
+  end;
 
 implementation
 
-function GetTOML(Contents: TBytes): TJSONObject;
+uses
+  TOML.Types,
+  System.Json.Serializers,
+  System.Json.Readers,
+  System.Json.Writers;
+
+{ TJSONObjectHelper }
+
+class function TJSONObjectHelper.FromTOML(const Contents: string): TJSONObject;
 begin
-  Result := TOML.Parser.GetTOML(Contents);
+  Result := FromTOML(TEncoding.UTF8.GetBytes(Contents));
 end;
 
-function GetTOML(Stream: TStream): TJSONObject;
+class function TJSONObjectHelper.FromTOML(Contents: TBytes): TJSONObject;
+begin
+  Result := TTOMLParser.TOMLToJson(Contents);
+end;
+
+class function TJSONObjectHelper.FromTOML(Stream: TStream): TJSONObject;
 var
   Contents: TBytes;
 begin
   SetLength(Contents, Stream.Size);
   Stream.Position := 0;
   Stream.Read(Contents, Stream.Size);
-  Result := GetTOML(Contents);
+  Result := FromTOML(Contents);
 end;
 
-function GetTOML(FileName: string): TJSONObject;
+class function TJSONObjectHelper.FromTOMLFile(const FileName: string): TJSONObject;
 var
   Stream: TFileStream;
 begin
   Stream := TFileStream.Create(FileName, fmOpenRead or fmShareDenyWrite);
-  Result := GetTOML(Stream);
+  try
+    Result := FromTOML(Stream);
+  finally
+    Stream.Free;
+  end;
 end;
 
+procedure TJSONObjectHelper.SaveTOMLtoFile(const FileName: string;
+  MultilineStrings: Boolean; Indent: Integer);
+var
+  Stream: TFileStream;
+begin
+  Stream := TFileStream.Create(FileName, fmOpenWrite);
+  try
+    StreamTOML(Stream, MultilineStrings, Indent);
+  finally
+    Stream.Free;
+  end;
+end;
+
+procedure TJSONObjectHelper.StreamTOML(Stream: TStream; MultilineStrings:
+    Boolean = False; Indent: Integer = 4);
+begin
+  TTOMLWriter.WriteToStream(Self, Stream, MultilineStrings, Indent);
+end;
+
+function TJSONObjectHelper.ToTOML(MultilineStrings: Boolean;
+  Indent: Integer): string;
+begin
+  Result := TTOMLWriter.ToTOML(Self, MultilineStrings, Indent);
+end;
+
+{ TTOMLSerializer }
+
+class function TTOMLSerializer.Deserialize<T>(const ATOML: string): T;
+var
+  Serializer: TJsonSerializer;
+  Reader: TJsonObjectReader;
+  JsonObject: TJsonObject;
+begin
+  if not (GetTypeKind(T) in [tkClass, tkRecord]) then
+    raise ETOMLSerializer.CreateRes(@rsTypeClassOrRecord);
+
+  try
+    JsonObject := TJSONObject.FromTOML(ATOML);
+  except
+    on E: Exception do
+      raise ETOMLSerializer.Create(E.Message);
+  end;
+
+  Serializer := TJsonSerializer.Create;
+  Reader := TJsonObjectReader.Create(JsonObject);
+  try
+    Result := Serializer.Deserialize<T>(Reader);
+  finally
+    Reader.Free;
+    Serializer.Free;
+    JsonObject.Free;
+  end;
+end;
+
+class function TTOMLSerializer.Serialize<T>(const AValue: T): string;
+var
+  Serializer: TJsonSerializer;
+  Writer: TJsonObjectWriter;
+begin
+  if not (GetTypeKind(T) in [tkClass, tkRecord]) then
+    raise ETOMLSerializer.CreateRes(@rsTypeClassOrRecord);
+
+  Serializer := TJsonSerializer.Create;
+  Writer := TJsonObjectWriter.Create;
+  try
+    Serializer.Serialize(Writer, AValue);
+    Result := (Writer.JSON as TJsonObject).ToTOML;
+  finally
+    Writer.Free;
+    Serializer.Free;
+  end;
+
+end;
 
 end.

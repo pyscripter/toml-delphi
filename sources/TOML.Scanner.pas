@@ -133,11 +133,11 @@ resourcestring
   rsInvalidLineBreak = 'Invalid line break: CR without LF';
 
 const
-  TCharSetLineEnding = [#10, #13];
-  TCharSetWhiteSpace = [#32, #9];
-  TCharSetWord =       ['a'..'z','A'..'Z','_','-'];
-  TCharSetInteger =    ['0'..'9'];
-  TCharSetQuotes =     ['"', ''''];
+  CharSetLineBreak =  [#10, #13];
+  CharSetWhiteSpace = [#32, #9];
+  CharSetWord =       ['a'..'z','A'..'Z','_','-'];
+  CharSetInteger =    ['0'..'9'];
+  CharSetQuotes =     ['"', ''''];
 
 function TTokenMethods.ToString: string;
 begin
@@ -240,9 +240,9 @@ begin
   consumedLineEnding := false;
   while True do
   begin
-    if c in TCharSetWhiteSpace then
+    if c in CharSetWhiteSpace then
       ReadChar
-    else if c in TCharSetLineEnding then
+    else if c in CharSetLineBreak then
     begin
       if c = #13 then
       begin
@@ -265,12 +265,12 @@ end;
 
 function TScanner.IsLineEnding: boolean;
 begin
-  result := c in TCharSetLineEnding;
+  result := c in CharSetLineBreak;
 end;
 
 function TScanner.IsWhiteSpace: boolean;
 begin
-  result := (c in TCharSetWhiteSpace) or IsLineEnding;
+  result := (c in CharSetWhiteSpace) or IsLineEnding;
 end;
 
 function TScanner.Peek(offset: integer = 1): AnsiChar;
@@ -321,7 +321,7 @@ end;
 function TScanner.ReadWord: TIdentifier;
 begin
   pattern := [];
-  while c in TCharSetWord + TCharSetInteger do
+  while c in CharSetWord + CharSetInteger do
     begin
       pattern := pattern + [Ord(c)];
       ReadChar;
@@ -370,7 +370,7 @@ begin
   if c = '+' then
     AdvancePattern;
 
-  while c in TCharSetInteger + ['.', 'e'] do
+  while c in CharSetInteger + ['.', 'e'] do
     begin
       // TODO: must be followed by a number!
       if c = 'e' then
@@ -379,7 +379,7 @@ begin
           if c = '-' then
             begin
               AdvancePattern;
-              while c in TCharSetInteger do
+              while c in CharSetInteger do
                 AdvancePattern;
                break;
             end;
@@ -422,9 +422,9 @@ begin
   ch := c;
   Index := 1;
 
-  while not (ch in TCharSetLineEnding + [#0])  do
+  while not (ch in CharSetLineBreak + [#0])  do
   begin
-    if not (ch in TCharSetWhiteSpace) then
+    if not (ch in CharSetWhiteSpace) then
       Exit(False);
     ch := Peek(Index);
     Inc(Index);
@@ -443,7 +443,7 @@ begin
       case c of
         '+':
           begin
-            if Peek in TCharSetInteger then
+            if Peek in CharSetInteger then
               ReadNumber
             else
               begin
@@ -453,7 +453,7 @@ begin
           end;
         '-':
           begin
-            if Peek in TCharSetInteger then
+            if Peek in CharSetInteger then
               ReadNumber
             else
               begin
