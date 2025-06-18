@@ -7,7 +7,7 @@ TOML parser, writer and serializer for Delphi. Learn more about Tom's Obvious, M
  - Passes all 734 (valid/invalid) [official validation tests](https://github.com/toml-lang/toml-test).
  - Fast. Single stream tokenizer and lexer, that doesn't use regex.
  - Converts TOML documents to Delphi's TJSONObject, thus allowing for easy traversal, manipulation and query of the generated documents
- - Inlcudes TTOMLWriter for converting TJSONObjects back to TOML.
+ - Includes TTOMLWriter for converting TJSONObjects back to TOML.
  - Provides for easy (de)serialization of Delphi objects and records from/to TOML.
  
 ### Usage
@@ -123,5 +123,5 @@ ArrayValue = [
 ```
 
 ### Credits:
-- The scanner and parser are based on [fpTOML](https://github.com/genericptr/fpTOML) by [Ryan Joseph](https://github.com/genericptr).  The parser has been massively modified and improved.
+- The scanner and parser are based on [fpTOML](https://github.com/genericptr/fpTOML) by [Ryan Joseph](https://github.com/genericptr).  The parser has been extensively modified and improved.
 - The TOML Writer is based on the python package [tomli-w](https://github.com/hukkin/tomli-w).
