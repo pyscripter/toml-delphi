@@ -12,7 +12,7 @@ TOML parser, writer and serializer for Delphi. Learn more about Tom's Obvious, M
  
 ### Usage
 
-There is nothing to install.  Just download or clone this repository and add the sources subdirectory directory to Delphi's libray search path.
+There is nothing to install.  Just download or clone this repository and add the sources subdirectory to Delphi's libray search path.
 
 The main unit you need to add to your uses clause is TOML.
 
