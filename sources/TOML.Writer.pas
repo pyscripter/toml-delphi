@@ -363,7 +363,6 @@ var
   Writer: TStreamWriter;
 begin
   FCxt := TContext.Create(FMultilineStrings, FIndent);
-  FCxt.InlineTableCache := TDictionary<TJSONObject, string>.Create;
 
   Writer := TStreamWriter.Create(Stream);
   try
@@ -378,7 +377,6 @@ var
   Writer: TStringWriter;
 begin
   FCxt := TContext.Create(FMultilineStrings, FIndent);
-  FCxt.InlineTableCache := TDictionary<TJSONObject, string>.Create;
 
   Writer := TStringWriter.Create;
   try
