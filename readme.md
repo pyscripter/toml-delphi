@@ -5,8 +5,8 @@ TOML parser, writer and serializer for Delphi. Learn more about Tom's Obvious, M
 ###  Features:
  - [TOML v1.0.0](https://toml.io/en/v1.0.0) compliant.
  - Passes all 734 (valid/invalid) [official validation tests](https://github.com/toml-lang/toml-test).
- - Fast. Single stream tokenizer and lexer which doesn't use regex.
- - Converts TOML documents to Delphi's RTL TJSONObject, thus allowing ease traversal, manipulation and query of the generated documents
+ - Fast. Single stream tokenizer and lexer, that doesn't use regex.
+ - Converts TOML documents to Delphi's TJSONObject, thus allowing for easy traversal, manipulation and query of the generated documents
  - Inlcudes TTOMLWriter for converting TJSONObjects back to TOML.
  - Provides for easy (de)serialization of Delphi objects and records from/to TOML.
  
@@ -39,17 +39,17 @@ This is the interface section of this unit:
 You can convert TOML source to `TJSONObject` using one of the FromTOML functions.  For example to parse a TOML file you use:
 
 ```pascal
-var JsonObject := TJSONObject.FomTOMLFile(FileName);
+var JsonObject := TJSONObject.FromTOMLFile(FileName);
 
 //or for parsing a TOML string:
 
-var JsonObject := TJSONObject.FomTOML(TOMLstring);
+var JsonObject := TJSONObject.FromTOML(TOMLstring);
 ```
 
 To convert a `TJSONObject` to TOML you use one of the methods `ToTOML`, `StreamTOML` or `SaveTOMLToFile`.  For example:
 
 ```pascal
-TOMLString := JsonObject.TOML;
+TOMLString := JsonObject.ToTOML;
 
 // or
 
@@ -124,4 +124,4 @@ ArrayValue = [
 
 ### Credits:
 - The scanner and parser are based on [fpTOML](https://github.com/genericptr/fpTOML) by [Ryan Joseph](https://github.com/genericptr).  The parser has been massively modified and improved.
-- The TOML Writer is loosely based on the python package [tomli-w](https://github.com/hukkin/tomli-w).
+- The TOML Writer is based on the python package [tomli-w](https://github.com/hukkin/tomli-w).
