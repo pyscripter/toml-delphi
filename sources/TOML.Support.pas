@@ -20,13 +20,6 @@ unit TOML.Support;
 
 interface
 
-uses
-  System.SysUtils,
-  System.Classes,
-  System.TypInfo,
-  System.Rtti,
-  System.JSON;
-
 const
   CharSetBareKey = ['0'..'9', 'a'..'z','A'..'Z','_','-'];
   CharSetIllegalStr = [#$0..#$8,#$A..#$1F, #$7F];
@@ -35,9 +28,5 @@ resourcestring
   rsTypeClassOrRecord = 'Type must be either a class or a record';
 
 implementation
-uses
-  System.Types,
-  System.Math,
-  System.JSONConsts;
 
 end.
