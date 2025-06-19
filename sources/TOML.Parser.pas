@@ -592,14 +592,14 @@ function TTOMLParser.ParseValue: TJSONValue;
     else if valueString = 'inf' then
       begin
         if Negative then
-          Result := TJSONFloat.Create('-inf')
+          Result := TJSONNumber.Create('-inf')
         else
-          Result := TJSONFloat.Create('inf');
+          Result := TJSONNumber.Create('inf');
         Consume;
       end
     else if valueString = 'nan' then
       begin
-          Result := TJSONFloat.Create('nan');
+          Result := TJSONNumber.Create('nan');
         Consume;
       end;
   end;

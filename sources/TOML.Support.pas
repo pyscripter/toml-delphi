@@ -27,18 +27,6 @@ uses
   System.Rtti,
   System.JSON;
 
-type
-
-  TJSONFloat = class(TJSONString)
-  private
-    function GetAsDouble: double;
-  protected
-    function AsTValue(ATypeInfo: PTypeInfo; var AValue: TValue): Boolean; override;
-  public
-    procedure ToChars(Builder: TStringBuilder; Options: TJSONAncestor.TJSONOutputOptions); override;
-    property AsDouble: double read GetAsDouble;
-  end;
-
 const
   CharSetBareKey = ['0'..'9', 'a'..'z','A'..'Z','_','-'];
   CharSetIllegalStr = [#$0..#$8,#$A..#$1F, #$7F];
@@ -51,53 +39,5 @@ uses
   System.Types,
   System.Math,
   System.JSONConsts;
-
-{ TJSONFloat }
-
-function TJSONFloat.AsTValue(ATypeInfo: PTypeInfo; var AValue: TValue): Boolean;
-begin
-  if ATypeInfo.Kind = tkFloat then
-  begin
-    if (FValue = 'inf') or (FValue = '+inf') then
-    begin
-      AValue := Infinity;
-      Result := True;
-    end
-    else if FValue = '-inf' then
-    begin
-      AValue := NegInfinity;
-      Result := True;
-    end
-    else if (FValue = 'nan') or (FValue = '+nan') or (FValue = '-nan') then
-    begin
-      AValue := Nan;
-      Result := True;
-    end else
-      Result := inherited;
-  end
-  else
-    Result := inherited;
-end;
-
-function TJSONFloat.GetAsDouble: double;
-var
-  Value: TValue;
-begin
-  if not AsTValue(TypeInfo(double), Value) then
-    raise EJSONException.CreateResFmt(@SCannotConvertJSONValueToType,
-      [ClassName, 'double']);
-  Result := Value.AsType<double>;
-end;
-
-procedure TJSONFloat.ToChars(Builder: TStringBuilder;
-  Options: TJSONAncestor.TJSONOutputOptions);
-begin
-  if (FValue = 'inf') or (FValue = '+inf') or (FValue = '-inf') or
-     (FValue = 'nan') or (FValue = '+nan') or (FValue = '-nan')
-  then
-    Builder.Append(FValue)
-  else
-    inherited;
-end;
 
 end.
