@@ -124,6 +124,7 @@ resourcestring
   rsInvalidPlusMinus = 'Invalid +/- sequence';
   rsUnderscoreSurroundedByDigits = 'Each underscore must be surrounded by at' +
   ' least one digit on each side';
+  rsInvalidFloatingNumber = 'Invalid floating number: "%s"';
   rsInvalidHexNumber = 'Invalid hexadecimal number';
   rsIncompleteOctalNumber = 'Incomplete octal number';
   rsIncompleteBinaryNumber = 'Incomplete binary number';
@@ -644,6 +645,7 @@ function TTOMLParser.ParseValue: TJSONValue;
 
 var
   negative: Boolean;
+  LExtended: Extended;
   str: string;
 begin
   Result := nil;
@@ -715,7 +717,10 @@ begin
           ParserError(rsNumbersWithLeadingZeros);
 
         str := TEncoding.UTF8.GetString(pattern);
-        result := TJSONNumber.Create(str);
+        if not TryStrToFloat(str, LExtended, InvariantFormatSettings) then
+          ParserError(Format(rsInvalidFloatingNumber, [str]))
+        else
+          result := TJSONNumber.Create(str);
         Consume;
       end;
     TToken.SquareBracketOpen:
