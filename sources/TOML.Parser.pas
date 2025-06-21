@@ -142,8 +142,11 @@ begin
   Parser := TTOMLParser.Create(Contents);
   try
     // check whether the input is valid utf8
-    if not TEncoding.UTF8.IsBufferValid(Contents) then
+    try
+      TEncoding.UTF8.GetString(Contents);
+    except
       Parser.ParserError(rsInvalidUtf8);
+    end;
     Parser.Parse;
     Result := Parser.document;
   finally
