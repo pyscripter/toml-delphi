@@ -10,6 +10,9 @@ TOML parser, writer and serializer for Delphi. Learn more about Tom's Obvious, M
  - Includes TTOMLWriter for converting TJSONObjects back to TOML.
  - Provides for easy (de)serialization of Delphi objects and records from/to TOML.
  
+### Compatibility
+This library is compatible with Delphi 10.4 (Sundey) and newer versions.
+
 ### Usage
 
 There is nothing to install.  Just download or clone this repository and add the sources subdirectory to Delphi's libray search path.
