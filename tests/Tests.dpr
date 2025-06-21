@@ -7,6 +7,7 @@ uses
   System.Classes,
   System.IOUtils,
   System.JSON,
+  System.Math,
   System.Generics.Collections,
   TOML.Scanner in '..\sources\TOML.Scanner.pas',
   TOML.Parser in '..\sources\TOML.Parser.pas',
@@ -109,8 +110,8 @@ begin
 
   for Path in files do
     begin
-      if not CompatibleTests.Contains(
-        Copy(Path, Length(BasePath) + 2).Replace('\', '/', [rfReplaceAll]))
+      if CompatibleTests.IndexOf(
+        Copy(Path, Length(BasePath) + 2).Replace('\', '/', [rfReplaceAll])) < 0
       then
         Continue;
 
@@ -179,7 +180,7 @@ type
    TOMLString: string;
  begin
    Rec.IntValue := 123;
-   Rec.FloatValue := 3.14;
+   Rec.FloatValue := NegInfinity;
    Rec.StringValue := 'abc';
    Rec.DateValue := Now;
    Rec.ArrayValue := ['A', 'B', 'C'];
