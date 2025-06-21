@@ -866,7 +866,7 @@ begin
   if not IsOffset then
     begin
       Consume(':');
-      Seconds := StrToFloat(ReadDigits(2, true));
+      Seconds := StrToFloat(ReadDigits(2, true), InvariantFormatSettings);
     end
   else
     Seconds := 0;

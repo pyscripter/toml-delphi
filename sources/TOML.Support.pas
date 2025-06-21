@@ -21,13 +21,23 @@ unit TOML.Support;
 
 interface
 
+uses
+  SysUtils;
+
 const
   CharSetBareKey = ['0'..'9', 'a'..'z','A'..'Z','_','-'];
   CharSetIllegalStr = [#$0..#$8,#$A..#$1F, #$7F];
+
+var
+  InvariantFormatSettings: TFormatSettings;
 
 resourcestring
   rsTypeClassOrRecord = 'Type must be either a class or a record';
 
 implementation
+
+initialization
+
+  InvariantFormatSettings := TFormatSettings.Invariant;
 
 end.
